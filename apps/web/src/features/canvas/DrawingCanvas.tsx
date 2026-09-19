@@ -1,17 +1,32 @@
-import { useState } from "react";
-import { Stage, Layer, Line } from "react-konva";
+import { useEffect, useRef, useState } from "react";
+import { Stage, Layer, Line, Image as CanvasImage } from "react-konva";
+import { captureDrawing } from "./drawing-image";
 import type { Bounds } from "@storyworld/contracts/model";
 export function DrawingCanvas({
   width,
   onFinish,
   disabled,
+  reference,
 }: {
   width: number;
-  onFinish: (bounds: Bounds) => void;
+  onFinish: (bounds: Bounds, image: string) => void;
   disabled: boolean;
+  reference?: string;
 }) {
   const [lines, setLines] = useState<number[][]>([]);
   const [drawing, setDrawing] = useState(false);
+  const strokes = useRef<number[][]>([]);
+  const [referenceImage, setReferenceImage] = useState<HTMLImageElement>();
+  useEffect(() => {
+    setReferenceImage(undefined);
+    if (!reference) return;
+    const image = new window.Image();
+    image.onload = () => setReferenceImage(image);
+    image.src = reference;
+    return () => {
+      image.onload = null;
+    };
+  }, [reference]);
   const scale = width / 1000;
   return (
     <Stage
@@ -20,39 +35,63 @@ export function DrawingCanvas({
       scaleX={scale}
       scaleY={scale}
       onPointerDown={(e) => {
-        if (disabled) return;
+        if (disabled || (reference && !referenceImage)) return;
         const p = e.target.getStage()?.getPointerPosition();
         if (!p) return;
-        setLines((v) => [...v, [p.x / scale, p.y / scale]]);
+        strokes.current = [
+          ...strokes.current,
+          [
+            Math.min(999, Math.max(0, p.x / scale)),
+            Math.min(599, Math.max(0, p.y / scale)),
+          ],
+        ];
+        setLines(strokes.current);
         setDrawing(true);
       }}
       onPointerMove={(e) => {
         if (!drawing) return;
         const p = e.target.getStage()?.getPointerPosition();
         if (!p) return;
-        setLines((v) => [
-          ...v.slice(0, -1),
-          [...v[v.length - 1]!, p.x / scale, p.y / scale],
-        ]);
+        strokes.current = [
+          ...strokes.current.slice(0, -1),
+          [
+            ...strokes.current.at(-1)!,
+            Math.min(999, Math.max(0, p.x / scale)),
+            Math.min(599, Math.max(0, p.y / scale)),
+          ],
+        ];
+        setLines(strokes.current);
       }}
       onPointerUp={() => {
         if (!drawing) return;
         setDrawing(false);
-        const points = lines.at(-1) ?? [];
+        const points = strokes.current.at(-1) ?? [];
         if (points.length < 4) return;
         const xs = points.filter((_, i) => i % 2 === 0),
           ys = points.filter((_, i) => i % 2 === 1);
         const x = Math.max(0, Math.min(...xs) - 5),
           y = Math.max(0, Math.min(...ys) - 5);
-        onFinish({
-          x,
-          y,
-          width: Math.min(1000 - x, Math.max(12, Math.max(...xs) - x + 5)),
-          height: Math.min(600 - y, Math.max(12, Math.max(...ys) - y + 5)),
-        });
+        onFinish(
+          {
+            x,
+            y,
+            width: Math.min(1000 - x, Math.max(12, Math.max(...xs) - x + 5)),
+            height: Math.min(600 - y, Math.max(12, Math.max(...ys) - y + 5)),
+          },
+          captureDrawing(strokes.current, referenceImage),
+        );
       }}
     >
       <Layer>
+        {referenceImage && (
+          <CanvasImage
+            image={referenceImage}
+            width={1000}
+            height={600}
+            opacity={0.35}
+            listening={false}
+          />
+        )}
         {lines.map((points, i) => (
           <Line
             key={i}
