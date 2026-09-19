@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 test("fixture bridge opens route, cloud brings rain, and reset restores world", async ({
   page,
 }) => {
-  await page.goto("/?mode=fixture");
+  await page.goto("/?mode=fixture&fixture=nova");
   await expect(page.getByText("River blocks the route")).toBeVisible();
   await page.getByRole("button", { name: "Add sample bridge" }).click();
   await expect(
@@ -19,7 +19,7 @@ test("fixture bridge opens route, cloud brings rain, and reset restores world", 
 });
 test("mobile guest has contribution controls", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/join?mode=fixture");
+  await page.goto("/join?mode=fixture&fixture=nova");
   await expect(
     page.getByRole("button", { name: "Propose storm cloud" }),
   ).toBeVisible();
@@ -35,8 +35,8 @@ test("mobile guest has contribution controls", async ({ page }) => {
 test("a drawn bridge goes through the API and opens the route", async ({
   page,
 }) => {
-  await page.goto("/?mode=fixture");
-  const canvas = page.locator(".drawing-layer canvas");
+  await page.goto("/?mode=fixture&fixture=nova");
+  const canvas = page.locator(".drawing-layer canvas").last();
   await expect(canvas).toBeVisible();
   await canvas.scrollIntoViewIfNeeded();
   const box = await canvas.boundingBox();

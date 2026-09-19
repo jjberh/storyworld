@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import type { InterpretationInput } from "@storyworld/contracts";
 
 async function drawBridge(page: Page) {
-  const canvas = page.locator(".drawing-layer canvas");
+  const canvas = page.locator(".drawing-layer canvas").last();
   await expect(canvas).toBeVisible();
   await canvas.scrollIntoViewIfNeeded();
   const box = (await canvas.boundingBox())!;
@@ -39,7 +39,7 @@ test("rewinding after a failed interpretation discards the stale retry", async (
   await page.route("**/api/interpret/edit", (route) =>
     route.fulfill({ status: 504, json: { message: "Timed out" } }),
   );
-  await page.goto("/?mode=fixture");
+  await page.goto("/?mode=fixture&fixture=nova");
   await drawBridge(page);
   await expect(
     page.getByRole("button", { name: "Try my drawing again" }),
@@ -63,7 +63,7 @@ test("dismissing a preview allows reinterpretation with revised narration", asyn
       },
     });
   });
-  await page.goto("/?mode=fixture");
+  await page.goto("/?mode=fixture&fixture=nova");
   await drawBridge(page);
   await page.getByRole("button", { name: "Keep drawing" }).click();
   await page.getByLabel("The story so far").fill("It is a bridge for Nova.");
@@ -94,7 +94,7 @@ test("a timeout preserves the drawing and retries its image with updated narrati
         : { json: response },
     );
   });
-  await page.goto("/?mode=fixture");
+  await page.goto("/?mode=fixture&fixture=nova");
   await drawBridge(page);
   await expect(
     page.getByRole("button", { name: "Try my drawing again" }),
@@ -102,6 +102,7 @@ test("a timeout preserves the drawing and retries its image with updated narrati
   await expect(page.getByText("River blocks the route")).toBeVisible();
   const preserved = await page
     .locator(".drawing-layer canvas")
+    .last()
     .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
   await page.getByLabel("The story so far").fill("Nova crosses my bridge.");
   await page.getByRole("button", { name: "Try my drawing again" }).click();
@@ -116,6 +117,7 @@ test("a timeout preserves the drawing and retries its image with updated narrati
   expect(
     await page
       .locator(".drawing-layer canvas")
+      .last()
       .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
   ).toBe(preserved);
 });
@@ -131,7 +133,7 @@ test("uncertain interpretations wait for confirmation before changing the world"
       },
     }),
   );
-  await page.goto("/?mode=fixture");
+  await page.goto("/?mode=fixture&fixture=nova");
   await drawBridge(page);
   await expect(
     page.getByRole("group", { name: "Choose what your drawing becomes" }),
@@ -149,7 +151,7 @@ test("a guest confirmation creates a proposal without opening the route", async 
   await page.route("**/api/interpret/edit", (route) =>
     route.fulfill({ json: response }),
   );
-  await page.goto("/join?mode=fixture");
+  await page.goto("/join?mode=fixture&fixture=nova");
   await drawBridge(page);
   await expect(
     page.getByText("Your proposal is ready for the director."),
@@ -164,7 +166,7 @@ test("an uploaded reference survives an interpretation failure", async ({
   await page.route("**/api/interpret/edit", (route) =>
     route.fulfill({ status: 504, json: { message: "Timed out" } }),
   );
-  await page.goto("/?mode=fixture");
+  await page.goto("/?mode=fixture&fixture=nova");
   const image = await page.evaluate(() => {
     const canvas = document.createElement("canvas");
     canvas.width = 100;

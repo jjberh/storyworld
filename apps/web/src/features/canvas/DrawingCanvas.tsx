@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Line, Image as CanvasImage } from "react-konva";
 import { captureDrawing } from "./drawing-image";
+import type { DrawingData } from "@storyworld/contracts";
 import type { Bounds } from "@storyworld/contracts/model";
 export function DrawingCanvas({
   width,
   onFinish,
   disabled,
   reference,
+  onChange,
+  referenceOpacity = 0.35,
 }: {
   width: number;
   onFinish: (bounds: Bounds, image: string) => void;
   disabled: boolean;
   reference?: string;
+  onChange?: (drawing: DrawingData) => void;
+  referenceOpacity?: number;
 }) {
   const [lines, setLines] = useState<number[][]>([]);
   const [drawing, setDrawing] = useState(false);
@@ -71,6 +76,8 @@ export function DrawingCanvas({
           ys = points.filter((_, i) => i % 2 === 1);
         const x = Math.max(0, Math.min(...xs) - 5),
           y = Math.max(0, Math.min(...ys) - 5);
+        const compositeImage = captureDrawing(strokes.current, referenceImage);
+        onChange?.({ strokes: strokes.current, compositeImage });
         onFinish(
           {
             x,
@@ -78,7 +85,7 @@ export function DrawingCanvas({
             width: Math.min(1000 - x, Math.max(12, Math.max(...xs) - x + 5)),
             height: Math.min(600 - y, Math.max(12, Math.max(...ys) - y + 5)),
           },
-          captureDrawing(strokes.current, referenceImage),
+          compositeImage,
         );
       }}
     >
@@ -88,10 +95,12 @@ export function DrawingCanvas({
             image={referenceImage}
             width={1000}
             height={600}
-            opacity={0.35}
+            opacity={referenceOpacity}
             listening={false}
           />
         )}
+      </Layer>
+      <Layer>
         {lines.map((points, i) => (
           <Line
             key={i}

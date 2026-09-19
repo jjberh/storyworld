@@ -1,6 +1,6 @@
 # Storyworld
 
-Storyworld is a shared, causal story world. A drawing can become an object, objects participate in a small rule system, and accepted changes appear as synchronized world events. The current repository is the team foundation: it has a polished fixture scene, a real SpacetimeDB module, typed contracts, and explicit seams for Gemini and ElevenLabs work.
+Storyworld begins with a child's own picture. They can start on a blank canvas or upload a drawing, add an optional description, and send the resulting scene draft to the typed scene-interpretation boundary. The draft keeps its normalized source image, strokes, and composite drawing while the picture is read, retried, and extended. The next experience stage will let the child confirm detected objects before creating a shared world.
 
 The foundation demo is deterministic:
 
@@ -15,9 +15,17 @@ Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini
 
 ## Shared integration contracts
 
-### Drawing experience
+### Initial authoring
 
-Draw directly on the page or upload a PNG, JPEG, or WebP reference (up to 10 MB), then trace the part to bring to life. Uploads are fitted to a 1000 × 600 drawing surface; they do not replace the semantic world. Each edit sends a compressed image, stroke bounds, and the narration text through the existing interpretation endpoint.
+The default route begins with exactly two choices: **Start from scratch** and **Upload a drawing**. Both create the same `StoryDocument` shape: a source image, structured drawing data (strokes plus composite image), and an optional description. A scratch document uses a real blank source layer; an upload is resized onto that same 1000 × 600 layer. New strokes always sit above the source layer, so future drawing layers can be added without replacing the child's image.
+
+**Bring my world to life** sends the draft composite image and optional child description to `POST /api/interpret/scene`. The browser preserves that draft during interpretation and recoverable failures, and **Try bringing it to life again** resubmits the same scene. It does not show object-confirmation controls or create world operations yet.
+
+The former Nova, river, and castle causal demo is retained only as an explicit fixture fallback at `/?mode=fixture&fixture=nova` for fixture demonstrations and automated coverage.
+
+### Fixture drawing experience
+
+The Nova fixture can still draw directly on the page or upload a PNG, JPEG, or WebP reference (up to 10 MB), then trace the part to bring to life. Each edit sends a compressed image, stroke bounds, and narration text through the edit-interpretation endpoint.
 
 Multiple candidates or confidence below 0.8 prompt a friendly choice before any world change. A failed interpretation preserves the strokes and uploaded reference; **Try my drawing again** reuses the captured image and bounds with your current narration. Drawing references are held in memory for the current page, not saved across reloads. Microphone input and event audio/captions remain pending provider integration. Text narration works now without audio.
 

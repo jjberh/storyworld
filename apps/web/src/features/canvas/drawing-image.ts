@@ -27,6 +27,17 @@ export async function readDrawing(file: File): Promise<string> {
   }
 }
 
+/** A real empty source layer, shared by scratch and uploaded-picture drafts. */
+export function createBlankDrawing() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1000;
+  canvas.height = 600;
+  const context = canvas.getContext("2d")!;
+  context.fillStyle = "#fffdf5";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
 export function captureDrawing(
   lines: number[][],
   reference?: HTMLImageElement,
