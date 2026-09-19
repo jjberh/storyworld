@@ -29,7 +29,9 @@ Run `npm run db:start` in one terminal. In another run
 VITE_SPACETIMEDB_URI=http://127.0.0.1:3000 and
 VITE_SPACETIMEDB_DATABASE=storyworld-local, then restart web. The normal live
 authoring flow can create a confirmed world after the updated module is
-published locally. For the retained collaboration test, open
+published locally. After **Start my story** the URL becomes
+`/?mode=live&world=story-…`; a second profile joins at
+`/join?mode=live&world=story-…`. For the retained Nova collaboration test, open
 `/?mode=live&world=your-room&fixture=nova`; a second browser profile uses
 `/join?mode=live&world=your-room&fixture=nova`.
 
@@ -39,7 +41,12 @@ and press **Start my story**. After about ten seconds **Try starting my story
 again** and **Review my picture again** appear; correct the URI and restart web
 to create the world.
 
-The cloud database has not been modified. Live Maincloud requires publishing this module first. Only Josh should publish. Browser identities are anonymous and persisted per database in browser storage. Table reads are public in this hackathon foundation; rooms separate edits, not confidential data.
+Maincloud `storyworld-zhvbk` now has this foundation module, including
+`story_document` and `initializeScene`. Its first migration did not run `init`,
+so the metadata row (`id='schema'`, `schema_version=1`) was inserted manually.
+Only Josh should publish further changes. Browser identities are anonymous and
+persisted per database in browser storage. Table reads are public in this
+hackathon foundation; rooms separate edits, not confidential data.
 
 ## What is implemented
 
@@ -59,7 +66,11 @@ The cloud database has not been modified. Live Maincloud requires publishing thi
   `StoryDocument`; local fixture worlds last for the page session, while live
   confirmed scenes are stored in the database. If creation fails, **Try starting
   my story again** resends the same request and **Review my picture again**
-  abandons it and unlocks editing. The milestone ends at the committed world.
+  abandons it and unlocks editing. After a successful commit the URL becomes a
+  room (`/?mode=…&world=<id>`). Guests join a live room at
+  `/join?mode=live&world=<id>` and see the same picture and events. Fixture
+  join cannot reopen another tab's in-memory world. Animation of the picture is
+  still the next milestone.
 - The explicit Nova fixture retains drawing capture, uploaded references,
   ambiguous-interpretation choices, and retry without losing the drawing.
 - Fastify `/api/interpret/edit`: live Gemini interpretation when `GEMINI_API_KEY` is set (schema-validated, recoverable errors), deterministic fixture otherwise. `/api/interpret/scene` turns an uploaded picture into a proposed initial scene; STT/TTS endpoints return explicit 501 until implemented.
