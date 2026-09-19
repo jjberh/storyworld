@@ -11,7 +11,7 @@ Add a storm cloud -> the world becomes rainy.
 Reset or rewind -> the semantic world returns to an earlier revision.
 ```
 
-Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` does the same for an uploaded picture. The ElevenLabs routes still return `501` until those integrations are implemented.
+Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` does the same for an uploaded picture. ElevenLabs voice is live when `ELEVENLABS_API_KEY` is set; without it the voice routes report `503 PROVIDER_NOT_CONFIGURED` and the UI falls back to text and captions.
 
 ## Shared integration contracts
 
@@ -87,7 +87,7 @@ GEMINI_API_KEY=
 ELEVENLABS_API_KEY=
 ```
 
-Optional server settings: `GEMINI_MODEL` (default `gemini-3.6-flash`), `GEMINI_TIMEOUT_MS` (default `8000`, kept below the browser's 10 second abort), and `GEMINI_SCENE_TIMEOUT_MS` (default `20000`; a whole scene takes about 7-9 seconds).
+Optional server settings: `GEMINI_MODEL` (default `gemini-3.6-flash`), `GEMINI_TIMEOUT_MS` (default `8000`, kept below the browser's 10 second abort), and `GEMINI_SCENE_TIMEOUT_MS` (default `20000`; a whole scene takes about 7-9 seconds). For voice: `ELEVENLABS_VOICE_ID` (default `EXAVITQu4vr4xnSDxMaL`), `ELEVENLABS_TTS_MODEL` (default `eleven_flash_v2_5`), `ELEVENLABS_STT_MODEL` (default `scribe_v2_realtime`), and `ELEVENLABS_TIMEOUT_MS` (default `8000`). The key needs the speech-to-text and text-to-speech permissions; it does not need `voices_read`.
 
 Never prefix provider secrets with `VITE_`, commit `.env`, or paste keys into an issue, chat, screenshot, or pull request.
 
@@ -139,6 +139,23 @@ The response uses the shared `SceneInterpretationResponse` contract. `imageBound
 Whole-scene requests may take 5-10 seconds. The browser client uses a 25-second abort for this endpoint and callers should show a non-blocking “reading your picture” state.
 
 In addition to the codes above, scene requests can return `IMAGE_REQUIRED` and `UNSUPPORTED_IMAGE` (400, not retryable: pick another picture) and `SCENE_NOT_RECOGNIZED` (422, retryable: no hero was found). The picture's bytes must match its declared type, so a mislabelled file is rejected before any model call.
+
+### Voice: transcription and reactions
+
+Speech in and speech out use ElevenLabs. Reactions come only from a confirmed `WorldEvent`, never from a button press or unconfirmed model output, and the animation never waits for speech. `/api/health` reports `audioMode` as `live` or `unavailable`.
+
+**Speech in.** `GET /api/elevenlabs/scribe-token` mints a single-use token (never cached, valid for 15 minutes) so the browser can transcribe directly without the API key: `{ "token", "model", "websocketUrl", "expiresInSeconds" }`. In the browser, `createTranscriber()` in `apps/web/src/features/intelligence/transcriber.ts` does the rest: `start()` opens the microphone and streams it, `onPartial` reports live text, and `stop()` resolves with the final transcript ("" if nothing was heard). Use `isVoiceInputSupported()` first and keep the text box as the fallback. A transcript can be wrong, so let the child or a grown-up edit it before it is used.
+
+**Speech out.** Both routes take `{ "event": { "id", "revision", "state" }, "previousState" }`, where `state` is the committed world (`pathStatus`, `weather`, `goal`, and `entities` with `id`, `kind`, and `name`) and `previousState` is the world before the event (`null` for the first event). The client sends only those fields.
+
+- `POST /api/reactions/cue` returns `{ "reaction": { "eventId", "text", "emotion" } | null }` instantly, with no provider call. Use it for the caption.
+- `POST /api/reactions/speech` returns `{ "reaction", "audio": { "mimeType": "audio/mpeg", "base64" } | null, "audioStatus": "ready" | "unavailable" | "failed" | "none", "error"? }`. A voice failure is not an HTTP error: the caption is still returned with `audio: null`, so the UI can carry on with text. Generated lines are cached in memory.
+
+The reaction is chosen from what the event changed: a bridge that opens the route is `delighted`, a bridge that still does not span the river is `worried`, and a storm cloud that starts rain is `curious`. Resets, most rewinds, and other events return `reaction: null`; a rewind that brings a bridge or cloud back counts as a change and can react. Each emotion uses different wording and voice settings.
+
+**Playing reactions.** `createBrowserReactionPlayer()` in `apps/web/src/features/intelligence/reaction-player.ts` wires the routes to the browser. Call `void player.observe(snapshot.events)` whenever the events change, once the world is connected. The first call only records existing history, so loading or reconnecting never speaks for old events. After that each event is reacted to at most once, remembered across a reload in `sessionStorage`, and only the newest unseen event is spoken. A newer event replaces narration that is still playing. `onCaption` fires as soon as the text is known and `onAudio` reports `playing`, `ended`, `unavailable`, or `failed`.
+
+To try it without the app UI, open [http://localhost:5173/voice-test.html](http://localhost:5173/voice-test.html) (development only).
 
 ## Josh: local and Maincloud database work
 

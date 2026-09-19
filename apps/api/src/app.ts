@@ -1,12 +1,16 @@
 import Fastify from "fastify";
 import { z } from "zod";
+import { registerAudioRoutes } from "./routes/audio";
 import { registerInterpretRoutes } from "./routes/interpret";
+import { createAudio, type AudioService } from "./services/elevenlabs";
 import { ApiError } from "./services/errors";
 import { createInterpreter, type Interpreter } from "./services/interpretation";
 
-export type AppOptions = { interpreter?: Interpreter };
+export type AppOptions = { interpreter?: Interpreter; audio?: AudioService };
 
 export function buildApp(options: AppOptions = {}) {
+  // Like the interpreter, audio is unavailable unless server.ts injects it.
+  const audio = options.audio ?? createAudio({});
   // Defaults to the keyless fixture; server.ts injects the env-configured one.
   const interpreter = options.interpreter ?? createInterpreter({});
   const app = Fastify({ bodyLimit: 5_000_000, logger: false });
@@ -31,21 +35,9 @@ export function buildApp(options: AppOptions = {}) {
     status: "ok",
     service: "storyworld-api",
     providerMode: interpreter.mode,
+    audioMode: audio.mode,
   }));
   registerInterpretRoutes(app, interpreter);
-  app.get("/api/elevenlabs/scribe-token", async (_request, reply) =>
-    reply.status(501).send({
-      code: "PROVIDER_NOT_IMPLEMENTED",
-      message:
-        "Realtime transcription is reserved for the intelligence implementation.",
-    }),
-  );
-  app.post("/api/reactions/speech", async (_request, reply) =>
-    reply.status(501).send({
-      code: "PROVIDER_NOT_IMPLEMENTED",
-      message:
-        "ElevenLabs streaming speech is reserved for the intelligence implementation.",
-    }),
-  );
+  registerAudioRoutes(app, audio);
   return app;
 }
