@@ -21,7 +21,7 @@ export function App() {
   const mode =
     params.get("mode") ?? import.meta.env.VITE_WORLD_MODE ?? "fixture";
   const room = params.get("world") ?? "nova";
-  const guest = location.pathname.startsWith("/join");
+  const requestedGuest = location.pathname.startsWith("/join");
   const client = useMemo<WorldClient>(
     () =>
       mode === "live" ? new LiveWorldClient(room) : new FixtureWorldClient(),
@@ -38,6 +38,10 @@ export function App() {
     "Nova wants to reach the castle, but she is afraid of water.",
   );
   const container = useRef<HTMLDivElement>(null);
+  const pendingFeedback = useRef<{
+    revision: number;
+    fallback: string;
+  } | null>(null);
   const [width, setWidth] = useState(800);
   useEffect(() => {
     void client.connect().catch((e) => setError(String(e)));
@@ -50,6 +54,20 @@ export function App() {
     );
     observer.observe(container.current);
     return () => observer.disconnect();
+  }, [snapshot.world]);
+  useEffect(() => {
+    const pending = pendingFeedback.current;
+    const confirmed = snapshot.world;
+    if (!pending || !confirmed || confirmed.revision <= pending.revision)
+      return;
+    pendingFeedback.current = null;
+    setNote(
+      confirmed.pathStatus === "available"
+        ? "The bridge holds. Nova has a way through."
+        : confirmed.entities.some((entity) => entity.kind === "bridge")
+          ? "Almost there — the bridge needs to reach both riverbanks."
+          : pending.fallback,
+    );
   }, [snapshot.world]);
   async function run(action: () => Promise<void>) {
     setError("");
@@ -72,22 +90,30 @@ export function App() {
       });
       const candidate = result.candidates[0];
       if (candidate) {
-        if (guest) await client.propose(candidate.operation);
-        else await client.apply(candidate.operation);
+        if (contributor) {
+          await client.propose(candidate.operation);
+          setNote("Your proposal is ready for the director.");
+        } else {
+          pendingFeedback.current = {
+            revision: world?.revision ?? -1,
+            fallback: result.message,
+          };
+          try {
+            await client.apply(candidate.operation);
+          } catch (error) {
+            pendingFeedback.current = null;
+            throw error;
+          }
+        }
+      } else {
+        setNote(result.message);
       }
-      const committed = client.getSnapshot().world;
-      setNote(
-        guest
-          ? "Your proposal is ready for the director."
-          : committed?.pathStatus === "available"
-            ? "The bridge holds. Nova has a way through."
-            : committed?.entities.some((entity) => entity.kind === "bridge")
-              ? "Almost there — the bridge needs to reach both riverbanks."
-              : result.message,
-      );
     });
   }
   const world = snapshot.world;
+  // The route chooses the initial flow; confirmed room ownership determines
+  // whether this browser can make a direct change after the room loads.
+  const contributor = requestedGuest || (!!world && !snapshot.isDirector);
   return (
     <main className="shell">
       <header>
@@ -117,8 +143,10 @@ export function App() {
           <span>YOUR STORY ROOM</span>
           <strong>{world?.id ?? room}</strong>
           <small>
-            {guest
-              ? "Guest contribution view"
+            {contributor
+              ? requestedGuest
+                ? "Guest contribution view"
+                : "This room belongs to another director. Propose a change instead."
               : snapshot.isDirector
                 ? "You are the director"
                 : "Join or create a world"}
@@ -164,12 +192,14 @@ export function App() {
           <button
             onClick={() =>
               void run(() =>
-                guest ? client.joinWorld(room) : client.createWorld(room),
+                requestedGuest
+                  ? client.joinWorld(room)
+                  : client.createWorld(room),
               )
             }
             disabled={busy || snapshot.status !== "ready"}
           >
-            {guest ? "Join" : "Create"} {room}
+            {requestedGuest ? "Join" : "Create"} {room}
           </button>
           <a href="/?mode=fixture">Use local fixture</a>
         </section>
@@ -254,27 +284,27 @@ export function App() {
                 disabled={busy}
                 onClick={() =>
                   void run(() =>
-                    guest
+                    contributor
                       ? client.propose(bridgeOperation())
                       : client.apply(bridgeOperation()),
                   )
                 }
               >
-                {guest ? "Propose" : "Add"} sample bridge
+                {contributor ? "Propose" : "Add"} sample bridge
               </button>
               <button
                 disabled={busy}
                 onClick={() =>
                   void run(() =>
-                    guest
+                    contributor
                       ? client.propose(cloudOperation())
                       : client.apply(cloudOperation()),
                   )
                 }
               >
-                {guest ? "Propose" : "Add"} storm cloud
+                {contributor ? "Propose" : "Add"} storm cloud
               </button>
-              {snapshot.isDirector && !guest && (
+              {snapshot.isDirector && !requestedGuest && (
                 <button
                   className="quiet"
                   disabled={busy}
@@ -288,7 +318,7 @@ export function App() {
             <p className="eyebrow">STORY MOMENTS</p>
             <button
               className="timeline-item"
-              disabled={busy || !snapshot.isDirector || guest}
+              disabled={busy || !snapshot.isDirector || requestedGuest}
               onClick={() => void run(() => client.rewind(0))}
             >
               00 · The adventure begins
@@ -297,7 +327,7 @@ export function App() {
               <button
                 className="timeline-item"
                 key={e.id}
-                disabled={busy || !snapshot.isDirector || guest}
+                disabled={busy || !snapshot.isDirector || requestedGuest}
                 onClick={() => void run(() => client.rewind(e.revision))}
               >
                 {String(e.revision).padStart(2, "0")} · {e.summary}

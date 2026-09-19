@@ -6,7 +6,7 @@ This is the runnable foundation before the three feature implementations. Shared
 
 Run `docker compose up --build --wait`, then open http://localhost:5173. No API keys or local SpacetimeDB are required in default fixture mode. The dependency service refreshes the container-only node_modules volume so old images or Windows dependencies do not break onboarding.
 
-Click Add sample bridge: the route opens. Add storm cloud: rain appears. Reset world restores the river obstacle. Draw a bridge across both banks to exercise the Fastify fixture interpretation endpoint. It uses your selected tool and stroke bounds; it does not claim to recognize drawings with AI yet.
+Click Add sample bridge: the route opens. Add storm cloud: rain appears. Reset world restores the river obstacle. Draw a bridge across both banks to exercise the Fastify fixture interpretation endpoint. Without a Gemini key it uses your selected tool and stroke bounds and labels the result as a fixture; with `GEMINI_API_KEY` set, Gemini identifies the drawing.
 
 ## Native
 
@@ -22,6 +22,6 @@ The cloud database has not been modified. Live Maincloud requires publishing thi
 
 - Typed world operations, geometric bridge rule, revisions, idempotency, director authorization, guest proposals, event snapshots, reset and restore.
 - React shell, Konva stroke input, Pixi procedural scene, same-origin API proxy, mobile route, fixture/live adapters.
-- Fastify validated fixture interpretation; STT/TTS endpoints return explicit 501 until implemented.
+- Fastify `/api/interpret/edit`: live Gemini interpretation when `GEMINI_API_KEY` is set (schema-validated, recoverable errors), deterministic fixture otherwise. `/api/interpret/scene` is still fixture-only; STT/TTS endpoints return explicit 501 until implemented.
 
-Live Gemini recognition, audio, sophisticated animation/pathfinding, QR generation, and finished UX are feature work after this checkpoint. Fixture rooms are local and do not synchronize. Rewind restores semantic state as a new revision; it does not replay historical audio or raw strokes.
+Audio, sophisticated animation/pathfinding, QR generation, and finished UX are feature work after this checkpoint. Fixture rooms are local and do not synchronize. Rewind restores semantic state as a new revision; it does not replay historical audio or raw strokes.
