@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import {
   confirmedSceneSchema,
   entitySchema,
-  type ConfirmedScene,
   type SceneCandidate,
   type SceneInterpretationResponse,
   type StoryDocument,
@@ -10,6 +9,11 @@ import {
 } from "@storyworld/contracts";
 import { FixtureWorldClient } from "@storyworld/world-fixtures";
 import { LiveWorldClient } from "../services/world-client";
+import {
+  creationReducer,
+  initialCreation,
+  type CreationAttempt,
+} from "./scene-creation";
 
 const kindLabels: Record<SceneCandidate["kind"], string> = {
   character: "Main character",
@@ -38,16 +42,15 @@ export function SceneConfirmation({
   const [moving, setMoving] = useState(false);
   const [changing, setChanging] = useState(false);
   const [fixtureConsent, setFixtureConsent] = useState(false);
-  const [status, setStatus] = useState<
-    "review" | "creating" | "failed" | "committed"
-  >("review");
+  // A validation message shown while reviewing; creation failures live in the
+  // creation state so they survive alongside the frozen attempt.
   const [error, setError] = useState("");
+  const [creation, dispatch] = useReducer(creationReducer, initialCreation);
+  const { status } = creation;
   const client = useRef<WorldClient | undefined>(undefined);
-  const pending = useRef<
-    { id: string; requestId: string; scene: ConfirmedScene } | undefined
-  >(undefined);
   const start = useRef<{ x: number; y: number } | undefined>(undefined);
   const locked = status !== "review";
+  const shownError = creation.error || error;
   const selectedObject =
     objects.find((object) => object.id === selected) ?? objects[0];
   const allChecked =
@@ -93,51 +96,59 @@ export function SceneConfirmation({
 
   function removeSelected() {
     if (!selectedObject) return;
-    const remaining = objects.filter((object) => object.id !== selectedObject.id);
+    const remaining = objects.filter(
+      (object) => object.id !== selectedObject.id,
+    );
     setObjects(remaining);
     setAccepted((current) => current.filter((id) => id !== selectedObject.id));
     setSelected(remaining[0]?.id ?? "");
     setChanging(false);
   }
 
+  // No relationship is inferred from a detected river: the child never
+  // confirmed that the character fears it, so no `fearedRiverId` is sent.
+  function freezeAttempt(): CreationAttempt | undefined {
+    if (!allChecked) {
+      setError("Give every picture part a quick check first.");
+      return undefined;
+    }
+    if (interpretation.mode === "fixture" && !fixtureConsent) {
+      setError("Choose the practice reading before starting this test story.");
+      return undefined;
+    }
+    const result = confirmedSceneSchema.safeParse({
+      document,
+      mode: interpretation.mode,
+      objects,
+      characterId:
+        objects.find((object) => object.kind === "character")?.id ?? "",
+      goalId: objects.some(
+        (object) => object.id === interpretation.goalCandidateId,
+      )
+        ? interpretation.goalCandidateId
+        : undefined,
+      openingNarration: interpretation.openingNarration,
+      moodHints: interpretation.moodHints,
+    });
+    if (!result.success) {
+      setError(result.error.issues[0]?.message ?? "Choose one main character.");
+      return undefined;
+    }
+    return {
+      id: "story-" + crypto.randomUUID().slice(0, 30),
+      requestId: crypto.randomUUID(),
+      scene: result.data,
+    };
+  }
+
   async function create() {
     if (stale || status === "creating" || status === "committed") return;
     setError("");
-    if (!pending.current) {
-      if (!allChecked) {
-        setError("Give every picture part a quick check first.");
-        return;
-      }
-      if (interpretation.mode === "fixture" && !fixtureConsent) {
-        setError("Choose the practice reading before starting this test story.");
-        return;
-      }
-      const result = confirmedSceneSchema.safeParse({
-        document,
-        mode: interpretation.mode,
-        objects,
-        characterId:
-          objects.find((object) => object.kind === "character")?.id ?? "",
-        goalId: objects.some(
-          (object) => object.id === interpretation.goalCandidateId,
-        )
-          ? interpretation.goalCandidateId
-          : undefined,
-        fearedRiverId: objects.find((object) => object.kind === "river")?.id,
-        openingNarration: interpretation.openingNarration,
-        moodHints: interpretation.moodHints,
-      });
-      if (!result.success) {
-        setError(
-          result.error.issues[0]?.message ?? "Choose one main character.",
-        );
-        return;
-      }
-      pending.current = {
-        id: "story-" + crypto.randomUUID().slice(0, 30),
-        requestId: crypto.randomUUID(),
-        scene: result.data,
-      };
+    // After a failure the frozen attempt is reused as is, so a retry after a
+    // lost response cannot create a second world.
+    const attempt = creation.attempt ?? freezeAttempt();
+    if (!attempt) return;
+    if (!client.current) {
       const mode =
         new URLSearchParams(location.search).get("mode") ??
         import.meta.env.VITE_WORLD_MODE ??
@@ -145,24 +156,36 @@ export function SceneConfirmation({
       client.current =
         interpretation.mode === "fixture" || mode !== "live"
           ? new FixtureWorldClient(true)
-          : new LiveWorldClient(pending.current.id);
+          : new LiveWorldClient(attempt.id);
     }
+    const worldClient = client.current;
     onLocked(true);
-    setStatus("creating");
+    dispatch({ type: "start", attempt });
     try {
-      await client.current!.connect();
-      await client.current!.initializeScene(
-        pending.current.id,
-        pending.current.requestId,
-        pending.current.scene,
+      await worldClient.connect();
+      await worldClient.initializeScene(
+        attempt.id,
+        attempt.requestId,
+        attempt.scene,
       );
-      if (client.current!.getSnapshot().world?.id !== pending.current.id)
+      if (worldClient.getSnapshot().world?.id !== attempt.id)
         throw new Error("Your story is taking a moment. Try again safely.");
-      setStatus("committed");
+      dispatch({ type: "committed" });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-      setStatus("failed");
+      dispatch({
+        type: "failed",
+        error: reason instanceof Error ? reason.message : String(reason),
+      });
     }
+  }
+
+  // Explicitly abandons the frozen attempt; a retry never goes through here.
+  function reviewAgain() {
+    client.current?.dispose();
+    client.current = undefined;
+    setError("");
+    dispatch({ type: "review" });
+    onLocked(false);
   }
 
   return (
@@ -180,7 +203,8 @@ export function SceneConfirmation({
             start.current = undefined;
           }}
           onPointerUp={(event) => {
-            if (!start.current || locked || stale || (!adding && !moving)) return;
+            if (!start.current || locked || stale || (!adding && !moving))
+              return;
             const end = point(event);
             const begin = start.current;
             start.current = undefined;
@@ -190,8 +214,7 @@ export function SceneConfirmation({
               width: Math.abs(end.x - begin.x),
               height: Math.abs(end.y - begin.y),
             };
-            if (imageBounds.width < 0.005 || imageBounds.height < 0.005)
-              return;
+            if (imageBounds.width < 0.005 || imageBounds.height < 0.005) return;
             if (adding) {
               const id = "object-" + crypto.randomUUID();
               setObjects((current) => [
@@ -263,7 +286,10 @@ export function SceneConfirmation({
         ) : selectedObject ? (
           <>
             <p className="check-progress">
-              Picture part {objects.findIndex((object) => object.id === selectedObject.id) + 1} of {objects.length}
+              Picture part{" "}
+              {objects.findIndex((object) => object.id === selectedObject.id) +
+                1}{" "}
+              of {objects.length}
             </p>
             <h2>
               {accepted.includes(selectedObject.id)
@@ -346,10 +372,10 @@ export function SceneConfirmation({
           <button
             className="add-missed"
             disabled={locked || stale || objects.length >= 20}
-              onClick={() => {
-                setAdding(true);
-                setMoving(false);
-                setChanging(false);
+            onClick={() => {
+              setAdding(true);
+              setMoving(false);
+              setChanging(false);
             }}
           >
             I missed something
@@ -366,9 +392,9 @@ export function SceneConfirmation({
             Use this practice reading
           </label>
         )}
-        {error && (
+        {shownError && (
           <p className="authoring-error" role="alert">
-            {error}
+            {shownError}
           </p>
         )}
         {status !== "committed" && allChecked && !adding && !moving && (
@@ -382,6 +408,11 @@ export function SceneConfirmation({
               : status === "failed"
                 ? "Try starting my story again"
                 : "Start my story"}
+          </button>
+        )}
+        {status === "failed" && (
+          <button className="quiet-action review-again" onClick={reviewAgain}>
+            Review my picture again
           </button>
         )}
       </div>

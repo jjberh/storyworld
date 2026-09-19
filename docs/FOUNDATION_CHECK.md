@@ -33,6 +33,12 @@ published locally. For the retained collaboration test, open
 `/?mode=live&world=your-room&fixture=nova`; a second browser profile uses
 `/join?mode=live&world=your-room&fixture=nova`.
 
+To see creation-failure recovery, run the web app in live mode with
+`VITE_SPACETIMEDB_URI` pointing at a port nothing listens on, check every object,
+and press **Start my story**. After about ten seconds **Try starting my story
+again** and **Review my picture again** appear; correct the URI and restart web
+to create the world.
+
 The cloud database has not been modified. Live Maincloud requires publishing this module first. Only Josh should publish. Browser identities are anonymous and persisted per database in browser storage. Table reads are public in this hackathon foundation; rooms separate edits, not confidential data.
 
 ## What is implemented
@@ -43,11 +49,17 @@ The cloud database has not been modified. Live Maincloud requires publishing thi
   preserves the source artwork beneath later strokes, and submits the composite
   image and optional description to `/api/interpret/scene`. Drafts survive
   interpretation failures and retry, but remain in memory for the page session.
-- The child can accept, change, remove, or add detected objects on the submitted
-  picture. Changing the picture or prompt requires reinterpretation.
-  `initializeScene` atomically creates the confirmed world and retains its
+- The child checks one proposed object at a time on the submitted picture and
+  answers **Yes, that's right!**, **Change it** (rename, retype, or redraw its
+  region), or **That is not in my picture**; **I missed something** adds an
+  object. Exactly one character is required. Changing the picture or prompt
+  requires reinterpretation. No fear rule is inferred from a detected river.
+  **Start my story** freezes one world ID and request ID and calls
+  `initializeScene`, which atomically creates the confirmed world and retains its
   `StoryDocument`; local fixture worlds last for the page session, while live
-  confirmed scenes are stored in the database.
+  confirmed scenes are stored in the database. If creation fails, **Try starting
+  my story again** resends the same request and **Review my picture again**
+  abandons it and unlocks editing. The milestone ends at the committed world.
 - The explicit Nova fixture retains drawing capture, uploaded references,
   ambiguous-interpretation choices, and retry without losing the drawing.
 - Fastify `/api/interpret/edit`: live Gemini interpretation when `GEMINI_API_KEY` is set (schema-validated, recoverable errors), deterministic fixture otherwise. `/api/interpret/scene` turns an uploaded picture into a proposed initial scene; STT/TTS endpoints return explicit 501 until implemented.
