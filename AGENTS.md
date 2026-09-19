@@ -24,6 +24,14 @@ npm run build
 npm run test:e2e
 ```
 
+## Model selection
+
+- Use GPT-5.6 Luna with medium reasoning for repository inspection, straightforward documentation, small fixes, and routine test updates.
+- Use GPT-5.6 Terra with medium reasoning as the default for normal implementation, feature work, integration, and debugging.
+- Use GPT-6 Astra with medium reasoning only for genuinely ambiguous architecture, cross-team contract decisions, difficult multi-system debugging, or a final high-risk review.
+- Keep reasoning set to medium for all models in this project. Do not use low, high, xhigh, max, or ultra reasoning by default.
+- Prefer the least capable model that can safely handle the task, and escalate models only when the task's complexity or risk justifies it.
+
 ## Architecture rules
 
 - React owns ephemeral UI state; SpacetimeDB owns confirmed shared world state.
