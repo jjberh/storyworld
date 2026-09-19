@@ -44,6 +44,68 @@ export const operationSchema = z.discriminatedUnion("type", [
     .strict(),
 ]);
 export const storyMoodSchema = z.enum(["curious", "worried", "delighted"]);
+export const imageBoundsSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().positive().max(1),
+    height: z.number().positive().max(1),
+  })
+  .strict()
+  .refine(
+    ({ x, width }) => x + width <= 1,
+    "Image bounds must fit horizontally",
+  )
+  .refine(
+    ({ y, height }) => y + height <= 1,
+    "Image bounds must fit vertically",
+  );
+export const sceneCandidateSchema = z
+  .object({
+    id: z.string().min(1).max(80),
+    name: z.string().min(1).max(80),
+    kind: entitySchema.shape.kind,
+    confidence: z.number().min(0).max(1),
+    imageBounds: imageBoundsSchema,
+  })
+  .strict();
+export const sceneInterpretationResponseSchema = z
+  .object({
+    mode: z.enum(["fixture", "live"]),
+    message: z.string().min(1).max(200),
+    candidates: z.array(sceneCandidateSchema).min(1).max(8),
+    openingNarration: z.string().min(1).max(600),
+    characterCandidateId: z.string().min(1).max(80),
+    goalCandidateId: z.string().min(1).max(80).optional(),
+    moodHints: z.array(storyMoodSchema).min(1).max(3),
+  })
+  .strict()
+  .superRefine((response, context) => {
+    const candidatesById = new Map(
+      response.candidates.map((candidate) => [candidate.id, candidate]),
+    );
+    if (candidatesById.size !== response.candidates.length)
+      context.addIssue({
+        code: "custom",
+        path: ["candidates"],
+        message: "Candidate IDs must be unique",
+      });
+    if (candidatesById.get(response.characterCandidateId)?.kind !== "character")
+      context.addIssue({
+        code: "custom",
+        path: ["characterCandidateId"],
+        message: "Character reference must identify a character candidate",
+      });
+    if (
+      response.goalCandidateId &&
+      candidatesById.get(response.goalCandidateId)?.kind !== "castle"
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["goalCandidateId"],
+        message: "Goal reference must identify a castle candidate",
+      });
+  });
 export const initialSceneResponseSchema = z
   .object({
     operations: z.array(operationSchema).max(20),

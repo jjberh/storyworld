@@ -11,11 +11,21 @@ Add a storm cloud -> the world becomes rainy.
 Reset or rewind -> the semantic world returns to an earlier revision.
 ```
 
-Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` still returns a fixture response until that integration is implemented. ElevenLabs voice is live when `ELEVENLABS_API_KEY` is set; without it the voice routes report `503 PROVIDER_NOT_CONFIGURED` and the UI falls back to text and captions.
+Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` does the same for an uploaded picture. ElevenLabs voice is live when `ELEVENLABS_API_KEY` is set; without it the voice routes report `503 PROVIDER_NOT_CONFIGURED` and the UI falls back to text and captions.
 
 ## Shared integration contracts
 
-Provider work can propose an `InitialSceneResponse`: ordered typed operations, opening narration, Nova's identity, and mood hints. It does not change the world directly. A confirmed `WorldEvent` is the handoff for visual and audio reactions; it carries a stable event ID, revision, readable summary, and the complete committed world state.
+### Drawing experience
+
+Draw directly on the page or upload a PNG, JPEG, or WebP reference (up to 10 MB), then trace the part to bring to life. Uploads are fitted to a 1000 × 600 drawing surface; they do not replace the semantic world. Each edit sends a compressed image, stroke bounds, and the narration text through the existing interpretation endpoint.
+
+Multiple candidates or confidence below 0.8 prompt a friendly choice before any world change. A failed interpretation preserves the strokes and uploaded reference; **Try my drawing again** reuses the captured image and bounds with your current narration. Drawing references are held in memory for the current page, not saved across reloads. Microphone input and event audio/captions remain pending provider integration. Text narration works now without audio.
+
+Verify the recovery path by returning a 504 from `/api/interpret/edit`, drawing a bridge, editing the narration, and retrying. The route must remain blocked until an interpretation is accepted and its operation commits. Browser coverage in `tests/drawing-flow.spec.ts` exercises timeout recovery, ambiguous results, uploads, and guest proposals.
+
+Dismiss an uncertain preview with **Keep drawing** to revise your words and retry the same image. Reset and rewind discard the draft and its retry image; results from interpretations started before the restore are ignored.
+
+Provider work proposes a `SceneInterpretationResponse`: image-space object candidates, confidence scores, opening narration, character and goal references, and mood hints. The child confirms or corrects those candidates before the application creates world operations. A confirmed `WorldEvent` is the handoff for visual and audio reactions; it carries a stable event ID, revision, readable summary, and the complete committed world state.
 
 ## Fastest start: Docker
 
@@ -77,7 +87,7 @@ GEMINI_API_KEY=
 ELEVENLABS_API_KEY=
 ```
 
-Optional server settings: `GEMINI_MODEL` (default `gemini-3.6-flash`) and `GEMINI_TIMEOUT_MS` (default `8000`, kept below the browser's 10 second abort). For voice: `ELEVENLABS_VOICE_ID` (default `EXAVITQu4vr4xnSDxMaL`), `ELEVENLABS_TTS_MODEL` (default `eleven_flash_v2_5`), `ELEVENLABS_STT_MODEL` (default `scribe_v2_realtime`), and `ELEVENLABS_TIMEOUT_MS` (default `8000`). The key needs the speech-to-text and text-to-speech permissions; it does not need `voices_read`.
+Optional server settings: `GEMINI_MODEL` (default `gemini-3.6-flash`), `GEMINI_TIMEOUT_MS` (default `8000`, kept below the browser's 10 second abort), and `GEMINI_SCENE_TIMEOUT_MS` (default `20000`; a whole scene takes about 7-9 seconds). For voice: `ELEVENLABS_VOICE_ID` (default `EXAVITQu4vr4xnSDxMaL`), `ELEVENLABS_TTS_MODEL` (default `eleven_flash_v2_5`), `ELEVENLABS_STT_MODEL` (default `scribe_v2_realtime`), and `ELEVENLABS_TIMEOUT_MS` (default `8000`). The key needs the speech-to-text and text-to-speech permissions; it does not need `voices_read`.
 
 Never prefix provider secrets with `VITE_`, commit `.env`, or paste keys into an issue, chat, screenshot, or pull request.
 
@@ -92,6 +102,43 @@ If Gemini fails, the route does not fall back to the fixture. It returns a recov
 ```
 
 Codes: `PROVIDER_TIMEOUT` (504), `PROVIDER_RATE_LIMITED` (503), `PROVIDER_UNAVAILABLE`, `PROVIDER_FAILED`, `PROVIDER_AUTH_FAILED`, `INVALID_MODEL_OUTPUT` (502), and `INVALID_INPUT` (400). Remove the key to run the fixture flow.
+
+### Scene interpretation
+
+`POST /api/interpret/scene` turns an uploaded picture plus optional narration into proposed objects for confirmation. Send `{ "image": "data:image/png;base64,…", "transcript": "optional narration" }`; PNG, JPEG, and WebP data URLs are accepted. Image data URLs are limited to 4,000,000 characters, so browser clients should resize or compress large phone photos before sending them. It returns candidates only and never creates world operations or writes to SpacetimeDB:
+
+```json
+{
+  "mode": "live",
+  "message": "A friendly sentence for the child.",
+  "candidates": [
+    {
+      "id": "character-…",
+      "kind": "character",
+      "name": "Sunny",
+      "confidence": 0.95,
+      "imageBounds": { "x": 0.105, "y": 0.458, "width": 0.17, "height": 0.258 }
+    },
+    {
+      "id": "castle-…",
+      "kind": "castle",
+      "name": "Tall Castle",
+      "confidence": 0.92,
+      "imageBounds": { "x": 0.71, "y": 0.2, "width": 0.2, "height": 0.35 }
+    }
+  ],
+  "openingNarration": "One warm sentence about the hero.",
+  "characterCandidateId": "character-…",
+  "goalCandidateId": "castle-…",
+  "moodHints": ["curious", "worried"]
+}
+```
+
+The response uses the shared `SceneInterpretationResponse` contract. `imageBounds` are normalized from 0 to 1 against the original picture, so the UI can place confirmation overlays without assuming an aspect ratio. Gemini identifies only `character`, `castle`, `river`, `bridge`, `cloud`, and `shelter`; the server mints candidate IDs, keeps at most one character, castle, and river, and requires a character. The application must wait for the child to confirm or correct candidates before converting them into world operations. Without a key the route returns fixed Nova, river, and castle candidates with `"mode": "fixture"` and ignores the image.
+
+Whole-scene requests may take 5-10 seconds. The browser client uses a 25-second abort for this endpoint and callers should show a non-blocking “reading your picture” state.
+
+In addition to the codes above, scene requests can return `IMAGE_REQUIRED` and `UNSUPPORTED_IMAGE` (400, not retryable: pick another picture) and `SCENE_NOT_RECOGNIZED` (422, retryable: no hero was found). The picture's bytes must match its declared type, so a mislabelled file is rejected before any model call.
 
 ### Voice: transcription and reactions
 

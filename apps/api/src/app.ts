@@ -4,10 +4,7 @@ import { registerAudioRoutes } from "./routes/audio";
 import { registerInterpretRoutes } from "./routes/interpret";
 import { createAudio, type AudioService } from "./services/elevenlabs";
 import { ApiError } from "./services/errors";
-import {
-  fixtureInterpretation,
-  type Interpreter,
-} from "./services/interpretation";
+import { createInterpreter, type Interpreter } from "./services/interpretation";
 
 export type AppOptions = { interpreter?: Interpreter; audio?: AudioService };
 
@@ -15,10 +12,7 @@ export function buildApp(options: AppOptions = {}) {
   // Like the interpreter, audio is unavailable unless server.ts injects it.
   const audio = options.audio ?? createAudio({});
   // Defaults to the keyless fixture; server.ts injects the env-configured one.
-  const interpreter: Interpreter = options.interpreter ?? {
-    mode: "fixture",
-    interpret: async (input) => fixtureInterpretation(input),
-  };
+  const interpreter = options.interpreter ?? createInterpreter({});
   const app = Fastify({ bodyLimit: 5_000_000, logger: false });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ApiError)

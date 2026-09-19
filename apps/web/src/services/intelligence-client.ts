@@ -1,5 +1,6 @@
 import {
   interpretationOutput,
+  sceneInterpretationResponseSchema,
   type InterpretationInput,
 } from "@storyworld/contracts";
 
@@ -18,14 +19,18 @@ export class InterpretationError extends Error {
   }
 }
 
-export async function interpretEdit(input: InterpretationInput) {
+async function requestInterpretation(
+  path: "/api/interpret/edit" | "/api/interpret/scene",
+  input: InterpretationInput,
+  timeoutMs: number,
+) {
   let response: Response;
   try {
-    response = await fetch("/api/interpret/edit", {
+    response = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     const timedOut = error instanceof Error && error.name === "TimeoutError";
@@ -45,5 +50,18 @@ export async function interpretEdit(input: InterpretationInput) {
       retryable === true,
     );
   }
-  return interpretationOutput.parse(await response.json());
+  return response.json();
+}
+
+export async function interpretEdit(input: InterpretationInput) {
+  return interpretationOutput.parse(
+    await requestInterpretation("/api/interpret/edit", input, 10000),
+  );
+}
+
+/** Whole-picture interpretation is slower; callers should show a non-blocking reading state. */
+export async function interpretScene(input: InterpretationInput) {
+  return sceneInterpretationResponseSchema.parse(
+    await requestInterpretation("/api/interpret/scene", input, 25000),
+  );
 }
