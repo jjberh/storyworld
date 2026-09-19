@@ -13,6 +13,10 @@ Reset or rewind -> the semantic world returns to an earlier revision.
 
 Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` and the ElevenLabs routes still return a fixture response or `501` until those integrations are implemented.
 
+## Shared integration contracts
+
+Provider work can propose an `InitialSceneResponse`: ordered typed operations, opening narration, Nova's identity, and mood hints. It does not change the world directly. A confirmed `WorldEvent` is the handoff for visual and audio reactions; it carries a stable event ID, revision, readable summary, and the complete committed world state.
+
 ## Fastest start: Docker
 
 Prerequisite: Docker Desktop with its engine running. No API keys or SpacetimeDB installation are needed for fixture mode.

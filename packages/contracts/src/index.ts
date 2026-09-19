@@ -43,6 +43,20 @@ export const operationSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
+export const storyMoodSchema = z.enum(["curious", "worried", "delighted"]);
+export const initialSceneResponseSchema = z
+  .object({
+    operations: z.array(operationSchema).max(20),
+    openingNarration: z.string().min(1).max(2_000),
+    character: z
+      .object({
+        id: z.string().min(1).max(80),
+        name: z.string().min(1).max(80),
+      })
+      .strict(),
+    moodHints: z.array(storyMoodSchema).min(1).max(3),
+  })
+  .strict();
 export const interpretationInput = z
   .object({
     transcript: z.string().max(2000).optional(),

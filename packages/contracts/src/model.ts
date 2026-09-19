@@ -8,6 +8,14 @@ export type Entity = {
   name: string;
   bounds: Bounds;
 };
+export type StoryMood = "curious" | "worried" | "delighted";
+export type CharacterIdentity = Pick<Entity, "id" | "name">;
+export type InitialSceneResponse = {
+  operations: WorldOperation[];
+  openingNarration: string;
+  character: CharacterIdentity;
+  moodHints: StoryMood[];
+};
 export type WorldRule = {
   id: string;
   subjectId: string;
@@ -49,7 +57,7 @@ export type Proposal = {
 export type ReactionCue = {
   eventId: string;
   text: string;
-  emotion: "curious" | "worried" | "delighted";
+  emotion: StoryMood;
 };
 export interface WorldClient {
   connect(): Promise<void>;
