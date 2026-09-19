@@ -37,9 +37,11 @@ Changing the picture or prompt invalidates the interpretation until it is submit
 
 If creation fails, the picture and the child's answers are kept and two actions appear. **Try starting my story again** is the primary one: it resends the same frozen world ID, request ID and payload, so a lost response or a repeated click cannot create a second world. **Review my picture again** deliberately abandons that attempt and unlocks the picture, the prompt and **Choose another drawing**; the next **Start my story** gets a fresh world ID and request ID.
 
-Fixture interpretation can only create a local test world. With live interpretation, `mode=fixture` still uses the local world client; `mode=live` uses the configured database. The source picture, strokes, composite, prompt, confirmed objects and opening narration are retained together. Database document rows are public like the foundation's other tables; do not upload confidential pictures. Local fixture documents last for this page session. Maincloud must receive the new module before live scene creation is available.
+Fixture interpretation can only create a local test world. With live interpretation, `mode=fixture` still uses the local world client; `mode=live` uses the configured database. The source picture, strokes, composite, prompt, confirmed objects and opening narration are retained together. Database document rows are public like the foundation's other tables; do not upload confidential pictures. Local fixture documents last for this page session. Maincloud `storyworld-zhvbk` now has this foundation module; further live schema changes still need a publish from Josh.
 
-This milestone ends at the committed world. Living-story playback, meaning animation of the child's picture and later story consequences, is subsequent work and does not exist yet.
+After the committed world is observed, the browser holds that world client for the page session and the URL becomes `/?mode=fixture&world=<id>` or `/?mode=live&world=<id>`. That address is the room. A guest opens `/join?mode=live&world=<id>` and subscribes to the same document, revision, and events. Fixture `/join` cannot see another tab's in-memory world; use live mode to share.
+
+This milestone ends at a shareable room that shows the confirmed picture and the event log. Living-story playback, meaning animation of the child's picture and later story consequences, is subsequent work and does not exist yet.
 
 The former Nova, river, and castle causal demo is retained only as an explicit fixture fallback at `/?mode=fixture&fixture=nova` for fixture demonstrations and automated coverage.
 
@@ -190,15 +192,24 @@ $env:VITE_SPACETIMEDB_DATABASE="storyworld-local"
 npm run dev -w @storyworld/web
 ```
 
-The default live route still opens the authoring flow. To exercise the retained
-Nova collaboration fixture, use separate browser profiles and an explicit test
-URL such as `?mode=live&world=josh-demo-1&fixture=nova`. The browser profile
-that creates the room is its director; a different profile can contribute at
-`/join?mode=live&world=josh-demo-1&fixture=nova`. After accepting a change,
-refresh both profiles and use the timeline to rewind; both clients should
-converge on the same state. The live client reconnects after a short connection
-interruption and resends an interrupted reducer call once with its original
-request ID.
+The default live route still opens the authoring flow. After **Start my story**
+with live interpretation, the URL becomes `/?mode=live&world=story-…`. A second
+browser profile joins that room at `/join?mode=live&world=story-…` and should
+see the same confirmed picture, revision, and story moments.
+
+The retained Nova collaboration fixture still uses separate browser profiles and
+an explicit test URL such as `?mode=live&world=josh-demo-1&fixture=nova`. The
+browser profile that creates the room is its director; a different profile can
+contribute at `/join?mode=live&world=josh-demo-1&fixture=nova`. After accepting
+a change, refresh both profiles and use the timeline to rewind; both clients
+should converge on the same state. The live client reconnects after a short
+connection interruption and resends an interrupted reducer call once with its
+original request ID.
+
+Maincloud `storyworld-zhvbk` is already published with the foundation schema.
+Its first migration did not run `init`, so the metadata row
+(`id='schema'`, `schema_version=1`) was inserted manually. This room work does
+not change the module; do not republish it for this PR.
 
 To publish the tested module to the shared Maincloud database, first confirm that the module matches the intended empty database and do not use `--delete-data`:
 

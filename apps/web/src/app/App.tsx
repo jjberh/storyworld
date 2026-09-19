@@ -32,6 +32,7 @@ import castleImage from "../assets/figma/castle.png";
 import sunIcon from "../assets/figma/sun.svg";
 import scribblesImage from "../assets/figma/scribbles.svg";
 import { InitialAuthoring } from "./InitialAuthoring";
+import { StoryRoom } from "./StoryRoom";
 
 function drawingVersion(snapshot: ClientSnapshot) {
   return (
@@ -611,9 +612,14 @@ export function FixtureExperience() {
 /** Nova is retained only for fixture demos and legacy browser coverage. */
 export function App() {
   const params = new URLSearchParams(location.search);
-  return params.get("fixture") === "nova" ? (
-    <FixtureExperience />
-  ) : (
-    <InitialAuthoring />
+  const [roomId, setRoomId] = useState(params.get("world"));
+  if (params.get("fixture") === "nova") return <FixtureExperience />;
+  if (roomId) return <StoryRoom key={roomId} worldId={roomId} />;
+  return (
+    <InitialAuthoring
+      onWorldReady={(id) => {
+        setRoomId(id);
+      }}
+    />
   );
 }

@@ -97,11 +97,13 @@ export class LiveWorldClient implements WorldClient {
             ),
           )
           .subscribe([
-            tables.world.where((w) => w.id.eq(this.room)),
-            tables.worldEvent.where((e) => e.worldId.eq(this.room)),
-            tables.proposal.where((p) => p.worldId.eq(this.room)),
+            tables.world.where((world) => world.id.eq(this.room)),
+            tables.worldEvent.where((event) => event.worldId.eq(this.room)),
+            tables.proposal.where((proposal) => proposal.worldId.eq(this.room)),
             tables.metadata,
-            tables.storyDocument.where((s) => s.worldId.eq(this.room)),
+            tables.storyDocument.where((document) =>
+              document.worldId.eq(this.room),
+            ),
           ]);
       })
       .onConnectError((conn) => {
@@ -194,6 +196,10 @@ export class LiveWorldClient implements WorldClient {
   }
   private waitForReady() {
     if (this.snapshot.status === "ready") return Promise.resolve();
+    if (this.snapshot.status === "error")
+      return Promise.reject(
+        new Error(this.snapshot.error ?? "Database connection failed."),
+      );
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         unsubscribe();

@@ -10,6 +10,7 @@ import {
   readDrawing,
 } from "../features/canvas/drawing-image";
 import { interpretScene } from "../services/intelligence-client";
+import type { RoomMode } from "../services/world-session";
 import { SceneConfirmation } from "./SceneConfirmation";
 
 type Phase = "choice" | "authoring" | "reading" | "error" | "ready";
@@ -36,7 +37,11 @@ function StoryworldHeader({ action }: { action?: ReactNode }) {
   );
 }
 
-export function InitialAuthoring() {
+export function InitialAuthoring({
+  onWorldReady,
+}: {
+  onWorldReady: (id: string, roomMode: RoomMode) => void;
+}) {
   const [phase, setPhase] = useState<Phase>("choice");
   const [draft, setDraft] = useState<SceneDraft>();
   const [error, setError] = useState("");
@@ -225,6 +230,7 @@ export function InitialAuthoring() {
                 interpretation={draft.interpretation}
                 stale={phase === "reading" || hasStaleInterpretation}
                 onLocked={setCreationLocked}
+                onWorldReady={onWorldReady}
               />
             ) : (
               <div className="paper authoring-paper">

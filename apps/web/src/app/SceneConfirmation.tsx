@@ -10,6 +10,12 @@ import {
 import { FixtureWorldClient } from "@storyworld/world-fixtures";
 import { LiveWorldClient } from "../services/world-client";
 import {
+  enterWorldRoom,
+  holdWorldClient,
+  peekWorldClient,
+  type RoomMode,
+} from "../services/world-session";
+import {
   creationReducer,
   initialCreation,
   type CreationAttempt,
@@ -29,11 +35,13 @@ export function SceneConfirmation({
   interpretation,
   stale,
   onLocked,
+  onWorldReady,
 }: {
   document: StoryDocument;
   interpretation: SceneInterpretationResponse;
   stale: boolean;
   onLocked: (locked: boolean) => void;
+  onWorldReady: (id: string, roomMode: RoomMode) => void;
 }) {
   const [objects, setObjects] = useState(interpretation.candidates);
   const [accepted, setAccepted] = useState<string[]>([]);
@@ -57,7 +65,16 @@ export function SceneConfirmation({
     objects.length > 0 &&
     objects.every((object) => accepted.includes(object.id));
 
-  useEffect(() => () => client.current?.dispose(), []);
+  useEffect(
+    () => () => {
+      const worldClient = client.current;
+      if (!worldClient) return;
+      const worldId = worldClient.getSnapshot().world?.id;
+      if (!worldId || peekWorldClient(worldId) !== worldClient)
+        worldClient.dispose();
+    },
+    [],
+  );
 
   function update(id: string, patch: Partial<SceneCandidate>) {
     setObjects((current) =>
@@ -170,7 +187,12 @@ export function SceneConfirmation({
       );
       if (worldClient.getSnapshot().world?.id !== attempt.id)
         throw new Error("Your story is taking a moment. Try again safely.");
+      const roomMode: RoomMode =
+        worldClient.getSnapshot().mode === "live" ? "live" : "fixture";
+      holdWorldClient(attempt.id, worldClient);
+      enterWorldRoom(attempt.id, roomMode);
       dispatch({ type: "committed" });
+      onWorldReady(attempt.id, roomMode);
     } catch (reason) {
       dispatch({
         type: "failed",

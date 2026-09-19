@@ -42,14 +42,20 @@ test("corrects an object, removes another, and starts the local story", async ({
   page,
 }) => {
   await begin(page);
-  await expect(page.getByRole("heading", { name: "Is this Fox?" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Is this Fox?" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Change it" }).click();
   await page.getByLabel("What should we call it?").fill("Ember");
   await page.getByRole("button", { name: "Yes, that's right!" }).click();
   await page.getByRole("button", { name: "That is not in my picture" }).click();
   await page.getByRole("button", { name: "Start my story" }).click();
-  await expect(page.getByText(/Your story is ready/)).toBeVisible();
-  await expect(page.getByLabel("What happens in your story?")).toBeDisabled();
+  await expect(
+    page.getByRole("heading", { name: "Your Story Room" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/world=story-/);
+  await expect(page.getByText("Fox explores.")).toBeVisible();
+  await expect(page.getByLabel("What happens in your story?")).toHaveCount(0);
 });
 
 test("live scene creation waits for its committed world and document", async ({
@@ -63,11 +69,14 @@ test("live scene creation waits for its committed world and document", async ({
   await page.getByRole("button", { name: "Yes, that's right!" }).click();
   await page.getByRole("button", { name: "Yes, that's right!" }).click();
   await page.getByRole("button", { name: "Start my story" }).click();
-  await expect(page.getByText(/Your story is ready/)).toBeVisible({
+  await expect(
+    page.getByRole("heading", { name: "Your Story Room" }),
+  ).toBeVisible({
     timeout: 20000,
   });
+  await expect(page).toHaveURL(/mode=live.*world=story-/);
   await page
-    .getByRole("region", { name: "Check your picture" })
+    .getByAltText("Your confirmed drawing")
     .screenshot({ path: testInfo.outputPath("confirmed-scene.png") });
 });
 test("requires reinterpretation after changing the child prompt", async ({
@@ -77,9 +86,7 @@ test("requires reinterpretation after changing the child prompt", async ({
   await page
     .getByLabel("What happens in your story?")
     .fill("A different beginning");
-  await expect(
-    page.getByText(/Your picture changed/),
-  ).toBeVisible();
+  await expect(page.getByText(/Your picture changed/)).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Start my story" }),
   ).toBeHidden();
@@ -98,11 +105,16 @@ test("sample detections require explicit consent and only create local test worl
   await page.getByRole("button", { name: "Yes, that's right!" }).click();
   await page.getByRole("button", { name: "Start my story" }).click();
   await expect(
-    page.getByText("Choose the practice reading before starting this test story."),
+    page.getByText(
+      "Choose the practice reading before starting this test story.",
+    ),
   ).toBeVisible();
   await page.getByLabel("Use this practice reading").check();
   await page.getByRole("button", { name: "Start my story" }).click();
-  await expect(page.getByText(/Your story is ready/)).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Your Story Room" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/mode=fixture.*world=story-/);
 });
 
 test("adds a missed object by marking its region and changing its type", async ({
@@ -123,5 +135,7 @@ test("adds a missed object by marking its region and changing its type", async (
   await page.getByRole("button", { name: "Yes, that's right!" }).click();
   await page.getByRole("button", { name: "Yes, that's right!" }).click();
   await page.getByRole("button", { name: "Start my story" }).click();
-  await expect(page.getByText(/Your story is ready/)).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Your Story Room" }),
+  ).toBeVisible();
 });

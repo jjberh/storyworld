@@ -278,6 +278,12 @@ input:focus-visible {
   border: 4px solid #3a1b6b;
   border-radius: 16px;
 }
+.room-picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
 .pixi-layer,
 .drawing-layer,
 .canvas-art {
