@@ -11,7 +11,11 @@ import {
   bridgeOperation,
   cloudOperation,
 } from "@storyworld/world-fixtures";
-import type { Bounds, WorldClient } from "@storyworld/contracts/model";
+import type {
+  Bounds,
+  ClientSnapshot,
+  WorldClient,
+} from "@storyworld/contracts/model";
 import type {
   InterpretationInput,
   InterpretationOutput,
@@ -21,6 +25,18 @@ import { WorldStage } from "../features/world-renderer/WorldStage";
 import { DrawingCanvas } from "../features/canvas/DrawingCanvas";
 import { interpretEdit } from "../services/intelligence-client";
 import { LiveWorldClient } from "../services/world-client";
+
+function drawingVersion(snapshot: ClientSnapshot) {
+  return (
+    (snapshot.world?.id ?? "") +
+    ":" +
+    snapshot.events.filter(
+      (event) =>
+        event.summary.includes("reset") || event.summary.includes("Restored"),
+    ).length
+  );
+}
+
 export function App() {
   const params = new URLSearchParams(location.search);
   const mode =
@@ -62,6 +78,20 @@ export function App() {
     bridge: boolean;
   } | null>(null);
   const [width, setWidth] = useState(800);
+  const version = drawingVersion(snapshot);
+  const previousVersion = useRef(version);
+  useEffect(() => {
+    if (previousVersion.current === version) return;
+    previousVersion.current = version;
+    // World restores also invalidate in-flight interpretations and retry images.
+    interpreting.current = false;
+    pendingFeedback.current = null;
+    setReference(undefined);
+    setLastDrawing(undefined);
+    setPreview(undefined);
+    setPhase("ready");
+    setNote("Draw across both riverbanks to give Nova a way through.");
+  }, [version]);
   useEffect(() => {
     void client.connect().catch((e) => setError(String(e)));
     return () => client.dispose();
@@ -149,6 +179,7 @@ export function App() {
   }
   async function interpretDrawing(input: InterpretationInput) {
     if (interpreting.current) return;
+    const requestVersion = drawingVersion(client.getSnapshot());
     interpreting.current = true;
     setLastDrawing(input);
     setError("");
@@ -157,6 +188,7 @@ export function App() {
     try {
       setNote("Reading your drawing…");
       const result = await interpretEdit(input);
+      if (requestVersion !== drawingVersion(client.getSnapshot())) return;
       const candidate = result.candidates[0];
       if (!candidate) {
         setPhase("retry");
@@ -169,12 +201,14 @@ export function App() {
         await commitCandidate(result, 0);
       }
     } catch {
+      if (requestVersion !== drawingVersion(client.getSnapshot())) return;
       setPhase("retry");
       setNote(
         "We couldn't read your drawing this time. It is safe here. Try again when you're ready.",
       );
     } finally {
-      interpreting.current = false;
+      if (requestVersion === drawingVersion(client.getSnapshot()))
+        interpreting.current = false;
     }
   }
   async function onDrawing(bounds: Bounds, image: string) {
@@ -347,15 +381,7 @@ export function App() {
               <WorldStage world={world} latestEvent={snapshot.events.at(-1)} />
               <div className="drawing-layer">
                 <DrawingCanvas
-                  key={
-                    world.id +
-                    ":" +
-                    snapshot.events.filter(
-                      (e) =>
-                        e.summary.includes("reset") ||
-                        e.summary.includes("Restored"),
-                    ).length
-                  }
+                  key={version}
                   width={width}
                   disabled={drawingBusy}
                   reference={reference}
@@ -425,7 +451,7 @@ export function App() {
                   className="quiet"
                   onClick={() => {
                     setPreview(undefined);
-                    setPhase("ready");
+                    setPhase("retry");
                     setNote(
                       "Keep drawing, or change your words and try again.",
                     );

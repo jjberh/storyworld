@@ -23,6 +23,8 @@ Multiple candidates or confidence below 0.8 prompt a friendly choice before any 
 
 Verify the recovery path by returning a 504 from `/api/interpret/edit`, drawing a bridge, editing the narration, and retrying. The route must remain blocked until an interpretation is accepted and its operation commits. Browser coverage in `tests/drawing-flow.spec.ts` exercises timeout recovery, ambiguous results, uploads, and guest proposals.
 
+Dismiss an uncertain preview with **Keep drawing** to revise your words and retry the same image. Reset and rewind discard the draft and its retry image; results from interpretations started before the restore are ignored.
+
 Provider work can propose an `InitialSceneResponse`: ordered typed operations, opening narration, Nova's identity, and mood hints. It does not change the world directly. A confirmed `WorldEvent` is the handoff for visual and audio reactions; it carries a stable event ID, revision, readable summary, and the complete committed world state.
 
 ## Fastest start: Docker

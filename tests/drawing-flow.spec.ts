@@ -33,6 +33,48 @@ const response = {
   ],
 };
 
+test("rewinding after a failed interpretation discards the stale retry", async ({
+  page,
+}) => {
+  await page.route("**/api/interpret/edit", (route) =>
+    route.fulfill({ status: 504, json: { message: "Timed out" } }),
+  );
+  await page.goto("/?mode=fixture");
+  await drawBridge(page);
+  await expect(
+    page.getByRole("button", { name: "Try my drawing again" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "00 · The adventure begins" }).click();
+  await expect(
+    page.getByRole("button", { name: "Try my drawing again" }),
+  ).toHaveCount(0);
+});
+
+test("dismissing a preview allows reinterpretation with revised narration", async ({
+  page,
+}) => {
+  const inputs: InterpretationInput[] = [];
+  await page.route("**/api/interpret/edit", (route) => {
+    inputs.push(route.request().postDataJSON());
+    return route.fulfill({
+      json: {
+        ...response,
+        candidates: [{ ...response.candidates[0], confidence: 0.5 }],
+      },
+    });
+  });
+  await page.goto("/?mode=fixture");
+  await drawBridge(page);
+  await page.getByRole("button", { name: "Keep drawing" }).click();
+  await page.getByLabel("The story so far").fill("It is a bridge for Nova.");
+  await page.getByRole("button", { name: "Try my drawing again" }).click();
+  await expect(
+    page.getByRole("button", { name: "Make it a Bridge" }),
+  ).toBeVisible();
+  expect(inputs).toHaveLength(2);
+  expect(inputs[1]!.transcript).toBe("It is a bridge for Nova.");
+});
+
 test("a timeout preserves the drawing and retries its image with updated narration", async ({
   page,
 }) => {
@@ -132,13 +174,11 @@ test("an uploaded reference survives an interpretation failure", async ({
     context.fillRect(0, 0, 100, 60);
     return canvas.toDataURL("image/png").split(",")[1]!;
   });
-  await page
-    .getByLabel("Upload a drawing")
-    .setInputFiles({
-      name: "drawing.png",
-      mimeType: "image/png",
-      buffer: Buffer.from(image, "base64"),
-    });
+  await page.getByLabel("Upload a drawing").setInputFiles({
+    name: "drawing.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(image, "base64"),
+  });
   await expect(
     page.getByText(
       "Your drawing is on the page. Trace the part you want to bring to life.",
