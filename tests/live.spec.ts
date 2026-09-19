@@ -12,12 +12,12 @@ test("live director and contributor synchronize an approved bridge", async ({
     const a = await director.newPage(),
       b = await guest.newPage();
     const room = "browser-" + Date.now();
-    await a.goto("/?mode=live&world=" + room);
+    await a.goto("/?mode=live&world=" + room + "&fixture=nova");
     await a.getByRole("button", { name: "Create " + room }).click();
     await expect(a.getByText("River blocks the route")).toBeVisible();
     // A second identity may use the root room URL. It must become a contributor
     // instead of attempting the director-only reducer.
-    await b.goto("/?mode=live&world=" + room);
+    await b.goto("/?mode=live&world=" + room + "&fixture=nova");
     await expect(
       b.getByText(
         "This room belongs to another director. Propose a change instead.",

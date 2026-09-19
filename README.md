@@ -1,6 +1,6 @@
 # Storyworld
 
-Storyworld is a shared, causal story world. A drawing can become an object, objects participate in a small rule system, and accepted changes appear as synchronized world events. The current repository is the team foundation: it has a polished fixture scene, a real SpacetimeDB module, typed contracts, and explicit seams for Gemini and ElevenLabs work.
+Storyworld begins with a child's own picture. They can start on a blank canvas or upload a drawing, add an optional description, and send the resulting scene draft to the typed scene-interpretation boundary. The draft keeps its normalized source image, strokes, and composite drawing while the picture is read, retried, and extended. The next experience stage will let the child confirm detected objects before creating a shared world.
 
 The foundation demo is deterministic:
 
@@ -15,9 +15,17 @@ Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini
 
 ## Shared integration contracts
 
-### Drawing experience
+### Initial authoring
 
-Draw directly on the page or upload a PNG, JPEG, or WebP reference (up to 10 MB), then trace the part to bring to life. Uploads are fitted to a 1000 × 600 drawing surface; they do not replace the semantic world. Each edit sends a compressed image, stroke bounds, and the narration text through the existing interpretation endpoint.
+The default route begins with exactly two choices: **Start from scratch** and **Upload a drawing**. Both create the same `StoryDocument` shape: a source image, structured drawing data (strokes plus composite image), and an optional description. A scratch document uses a real blank source layer; an upload is resized onto that same 1000 × 600 layer. New strokes always sit above the source layer, so future drawing layers can be added without replacing the child's image.
+
+**Bring my world to life** sends the draft composite image and optional child description to `POST /api/interpret/scene`. The browser preserves that draft during interpretation and recoverable failures, and **Try bringing it to life again** resubmits the same scene. It does not show object-confirmation controls or create world operations yet.
+
+The former Nova, river, and castle causal demo is retained only as an explicit fixture fallback at `/?mode=fixture&fixture=nova` for fixture demonstrations and automated coverage.
+
+### Fixture drawing experience
+
+The Nova fixture can still draw directly on the page or upload a PNG, JPEG, or WebP reference (up to 10 MB), then trace the part to bring to life. Each edit sends a compressed image, stroke bounds, and narration text through the edit-interpretation endpoint.
 
 Multiple candidates or confidence below 0.8 prompt a friendly choice before any world change. A failed interpretation preserves the strokes and uploaded reference; **Try my drawing again** reuses the captured image and bounds with your current narration. Drawing references are held in memory for the current page, not saved across reloads. Microphone input and event audio/captions remain pending provider integration. Text narration works now without audio.
 
@@ -37,7 +45,10 @@ cd storyworld
 docker compose up --build --wait
 ```
 
-Open [http://localhost:5173/?mode=fixture](http://localhost:5173/?mode=fixture). The API health endpoint is [http://localhost:3001/api/health](http://localhost:3001/api/health).
+Open [http://localhost:5173/?mode=fixture](http://localhost:5173/?mode=fixture)
+for the child-led authoring flow. The deterministic Nova demo remains available
+at [http://localhost:5173/?mode=fixture&fixture=nova](http://localhost:5173/?mode=fixture&fixture=nova).
+The API health endpoint is [http://localhost:3001/api/health](http://localhost:3001/api/health).
 
 Stop the services with:
 
@@ -138,7 +149,7 @@ The response uses the shared `SceneInterpretationResponse` contract. `imageBound
 
 Whole-scene requests may take 5-10 seconds. The browser client uses a 25-second abort for this endpoint and callers should show a non-blocking “reading your picture” state.
 
-In addition to the codes above, scene requests can return `IMAGE_REQUIRED` and `UNSUPPORTED_IMAGE` (400, not retryable: pick another picture) and `SCENE_NOT_RECOGNIZED` (422, retryable: no hero was found). The picture's bytes must match its declared type, so a mislabelled file is rejected before any model call.
+In addition to the codes above, scene requests can return `IMAGE_REQUIRED` and `UNSUPPORTED_IMAGE` (400, not retryable: pick another picture) and `SCENE_NOT_RECOGNIZED` (422, retryable: no character was found). The picture's bytes must match its declared type, so a mislabelled file is rejected before any model call.
 
 ## Josh: local and Maincloud database work
 
@@ -159,7 +170,15 @@ $env:VITE_SPACETIMEDB_DATABASE="storyworld-local"
 npm run dev -w @storyworld/web
 ```
 
-Use separate browser profiles for the director and guest, and choose a fresh room name for each run (for example, `?mode=live&world=josh-demo-1`). The browser profile that creates the room is its director; reopening that same profile with the same host, port, and database regains director access. A different profile is a contributor, even at the root room URL, and can propose rather than directly change the world. After accepting a change, refresh both profiles and use the timeline to rewind; both clients should converge on the same state. The live client reconnects after a short connection interruption and resends an interrupted reducer call once with its original request ID.
+The default live route still opens the authoring flow. To exercise the retained
+Nova collaboration fixture, use separate browser profiles and an explicit test
+URL such as `?mode=live&world=josh-demo-1&fixture=nova`. The browser profile
+that creates the room is its director; a different profile can contribute at
+`/join?mode=live&world=josh-demo-1&fixture=nova`. After accepting a change,
+refresh both profiles and use the timeline to rewind; both clients should
+converge on the same state. The live client reconnects after a short connection
+interruption and resends an interrupted reducer call once with its original
+request ID.
 
 To publish the tested module to the shared Maincloud database, first confirm that the module matches the intended empty database and do not use `--delete-data`:
 

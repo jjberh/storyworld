@@ -137,5 +137,28 @@ export const interpretationOutput = z.object({
   ),
   message: z.string(),
 });
+export const drawingDataSchema = z
+  .object({
+    strokes: z.array(z.array(z.number()).min(4)).max(2_000),
+    compositeImage: z.string().min(1).max(4_000_000),
+  })
+  .strict();
+/** The durable browser draft for a child's picture before it becomes a world. */
+export const storyDocumentSchema = z
+  .object({
+    sourceImage: z.string().min(1).max(4_000_000),
+    drawing: drawingDataSchema,
+    description: z.string().max(2_000).optional(),
+  })
+  .strict();
+export const sceneDraftSchema = z
+  .object({
+    document: storyDocumentSchema,
+    interpretation: sceneInterpretationResponseSchema.optional(),
+  })
+  .strict();
 export type InterpretationInput = z.infer<typeof interpretationInput>;
 export type InterpretationOutput = z.infer<typeof interpretationOutput>;
+export type DrawingData = z.infer<typeof drawingDataSchema>;
+export type StoryDocument = z.infer<typeof storyDocumentSchema>;
+export type SceneDraft = z.infer<typeof sceneDraftSchema>;

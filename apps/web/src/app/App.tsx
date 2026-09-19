@@ -31,6 +31,7 @@ import cloudIcon from "../assets/figma/cloud.svg";
 import castleImage from "../assets/figma/castle.png";
 import sunIcon from "../assets/figma/sun.svg";
 import scribblesImage from "../assets/figma/scribbles.svg";
+import { InitialAuthoring } from "./InitialAuthoring";
 
 function drawingVersion(snapshot: ClientSnapshot) {
   return (
@@ -43,7 +44,7 @@ function drawingVersion(snapshot: ClientSnapshot) {
   );
 }
 
-export function App() {
+export function FixtureExperience() {
   const params = new URLSearchParams(location.search);
   const mode =
     params.get("mode") ?? import.meta.env.VITE_WORLD_MODE ?? "fixture";
@@ -287,7 +288,7 @@ export function App() {
           >
             {requestedGuest ? "Join" : "Create"} {room}
           </button>
-          <a href="/?mode=fixture">Use local fixture</a>
+          <a href="/?mode=fixture&fixture=nova">Use local fixture</a>
         </section>
       ) : (
         <section className="workspace">
@@ -401,7 +402,8 @@ export function App() {
                         "/join?mode=" +
                         mode +
                         "&world=" +
-                        world.id,
+                        world.id +
+                        "&fixture=nova",
                     );
                     setNote(
                       mode === "fixture"
@@ -603,5 +605,15 @@ export function App() {
         </span>
       </footer>
     </main>
+  );
+}
+
+/** Nova is retained only for fixture demos and legacy browser coverage. */
+export function App() {
+  const params = new URLSearchParams(location.search);
+  return params.get("fixture") === "nova" ? (
+    <FixtureExperience />
+  ) : (
+    <InitialAuthoring />
   );
 }
