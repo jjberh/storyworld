@@ -1,35 +1,20 @@
 name: storyworld
-
 services:
-  web:
+  deps:
     build:
       context: .
       dockerfile: Dockerfile.dev
       target: development
-    command: npm run dev --workspace=@storyworld/web -- --host 0.0.0.0
-    ports:
-      - "5173:5173"
+    command: npm ci --no-audit --no-fund
     volumes:
       - .:/workspace
       - storyworld_node_modules:/workspace/node_modules
-    environment:
-      VITE_API_BASE_URL: http://localhost:3001
-      VITE_SPACETIMEDB_URI: ${VITE_SPACETIMEDB_URI:-https://maincloud.spacetimedb.com}
-      VITE_SPACETIMEDB_DATABASE: ${VITE_SPACETIMEDB_DATABASE:-storyworld-zhvbk}
-      CHOKIDAR_USEPOLLING: "true"
-    depends_on:
-      api:
-        condition: service_healthy
-    init: true
-
   api:
     build:
       context: .
       dockerfile: Dockerfile.dev
       target: development
     command: npm run dev --workspace=@storyworld/api
-    ports:
-      - "3001:3001"
     volumes:
       - .:/workspace
       - storyworld_node_modules:/workspace/node_modules
@@ -39,18 +24,54 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: "3001"
-      NODE_ENV: development
+    ports:
+      - "3001:3001"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
     healthcheck:
       test:
-        - CMD
-        - node
-        - -e
-        - fetch('http://127.0.0.1:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
       interval: 3s
       timeout: 2s
-      retries: 20
-      start_period: 10s
+      retries: 30
     init: true
-
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: development
+    command: npm run dev --workspace=@storyworld/web
+    volumes:
+      - .:/workspace
+      - storyworld_node_modules:/workspace/node_modules
+    environment:
+      API_PROXY_TARGET: http://api:3001
+      VITE_WORLD_MODE: ${VITE_WORLD_MODE:-fixture}
+      VITE_SPACETIMEDB_URI: ${VITE_SPACETIMEDB_URI:-https://maincloud.spacetimedb.com}
+      VITE_SPACETIMEDB_DATABASE: ${VITE_SPACETIMEDB_DATABASE:-storyworld-zhvbk}
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5173').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+    init: true
 volumes:
   storyworld_node_modules:

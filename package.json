@@ -1,0 +1,43 @@
+{
+  "name": "storyworld",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "spacetimedb"
+  ],
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"npm run dev -w @storyworld/api\" \"npm run dev -w @storyworld/web\"",
+    "build": "npm run build -w @storyworld/web",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p spacetimedb/tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "db:start": "spacetime start",
+    "db:build": "tsc --noEmit -p spacetimedb/tsconfig.json && spacetime build --module-path spacetimedb",
+    "db:generate": "spacetime generate --lang typescript --out-dir apps/web/src/module_bindings --module-path spacetimedb",
+    "db:publish:local": "spacetime publish storyworld-local --server local --module-path spacetimedb --delete-data=never",
+    "test:db": "tsx tests/database-check.ts",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "concurrently": "^9.2.0",
+    "eslint": "^9.39.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.9.8",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.0",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^4.1.11"
+  }
+}

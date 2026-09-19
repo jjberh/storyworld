@@ -1,0 +1,16 @@
+{
+  "name": "@storyworld/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts"
+  },
+  "dependencies": {
+    "@storyworld/contracts": "*",
+    "@storyworld/world-fixtures": "*",
+    "fastify": "^5.6.0",
+    "dotenv": "^17.2.0",
+    "zod": "^4.1.0"
+  }
+}

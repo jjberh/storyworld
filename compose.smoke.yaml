@@ -1,0 +1,21 @@
+name: storyworld-smoke
+
+services:
+  smoke:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: smoke
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 2s
+    init: true

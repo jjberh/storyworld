@@ -1,0 +1,340 @@
+@import "tailwindcss";
+:root {
+  font-family: Arial, sans-serif;
+  color: #2e493c;
+  background: #f5f3eb;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+a,
+input,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+button {
+  font: inherit;
+  border: 1px solid #d7ddce;
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: #fffdf5;
+  color: #34523f;
+  cursor: pointer;
+}
+button:hover {
+  background: #e9eddc;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button:focus-visible,
+a:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #c07548;
+  outline-offset: 3px;
+}
+a {
+  color: inherit;
+}
+.shell {
+  max-width: 1440px;
+  padding: 28px 48px;
+  margin: auto;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #dce0d3;
+}
+.brand {
+  font-family: Georgia, serif;
+  font-size: 28px;
+  text-decoration: none;
+}
+.brand span {
+  display: block;
+  font: 9px Arial;
+  letter-spacing: 2px;
+  margin: 8px 0 0 29px;
+}
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6b8b5a;
+}
+.status span {
+  margin-left: 14px;
+  padding: 8px;
+  border: 1px solid #dce0d3;
+  border-radius: 20px;
+  color: #7b816e;
+}
+.intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 34px 0 28px;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 2px;
+  font-weight: 700;
+  color: #7d866e;
+}
+h1 {
+  font:
+    48px/1.04 Georgia,
+    serif;
+  margin: 15px 0;
+}
+h1 em {
+  color: #a96b48;
+  font-weight: normal;
+}
+p {
+  line-height: 1.6;
+  font-size: 14px;
+}
+.intro p:not(.eyebrow) {
+  color: #7c8171;
+}
+.room-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+  border: 1px solid #dce0d3;
+  border-radius: 16px;
+  min-width: 220px;
+}
+.room-card > span {
+  font-size: 9px;
+  letter-spacing: 2px;
+}
+.room-card strong {
+  font: 25px Georgia;
+}
+.room-card small {
+  color: #7a8173;
+}
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 265px;
+  gap: 28px;
+}
+.paper-column {
+  min-width: 0;
+}
+.canvas-tools {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 8px;
+}
+.canvas-tools button {
+  margin-right: 6px;
+  font-size: 12px;
+}
+.canvas-tools button[aria-pressed="true"] {
+  background: #365541;
+  color: white;
+}
+.canvas-tools > span {
+  font-size: 11px;
+  color: #79806f;
+}
+.paper {
+  position: relative;
+  background: #faf7e7;
+  border: 1px solid #e5dfcc;
+  border-radius: 16px;
+  overflow: hidden;
+  aspect-ratio: 5/3;
+  box-shadow: 0 12px 35px #53634a0d;
+}
+.pixi-layer,
+.drawing-layer {
+  position: absolute;
+  inset: 0;
+}
+.pixi-layer canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+.drawing-layer {
+  touch-action: none;
+}
+.paper-caption {
+  position: absolute;
+  bottom: 16px;
+  left: 24px;
+  font-size: 8px;
+  letter-spacing: 3px;
+  color: #647854;
+  pointer-events: none;
+}
+.narration {
+  margin-top: 18px;
+  border: 1px solid #dce0d3;
+  padding: 14px 18px;
+  border-radius: 12px;
+}
+.narration label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+}
+.narration textarea {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  resize: vertical;
+  font: 15px/1.5 Georgia;
+  color: #52644c;
+}
+.narration small {
+  font-size: 10px;
+  color: #858977;
+}
+aside {
+  padding: 16px 0;
+}
+h2 {
+  font: 27px/1.15 Georgia;
+}
+.note {
+  font-size: 12px;
+  color: #7e8172;
+  min-height: 70px;
+}
+.actions {
+  display: grid;
+  gap: 8px;
+}
+.actions > button:first-child {
+  background: #365541;
+  color: #fff;
+}
+.quiet {
+  border: 0;
+  background: transparent;
+}
+.divider {
+  height: 1px;
+  background: #dce0d3;
+  margin: 24px 0;
+}
+.timeline-item {
+  display: block;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+  padding: 10px 0;
+  width: 100%;
+}
+.proposal {
+  background: #e7ebd9;
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.proposal button {
+  padding: 6px;
+  margin-right: 6px;
+}
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: 10px;
+  color: #8a8d7d;
+  padding: 25px 0;
+}
+.error {
+  padding: 12px;
+  border: 1px solid #cf9574;
+  color: #8c442b;
+  border-radius: 10px;
+  margin-bottom: 15px;
+}
+.empty {
+  padding: 30px;
+}
+.empty a {
+  margin-left: 20px;
+}
+@media (max-width: 850px) {
+  .shell {
+    padding: 20px;
+  }
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .intro {
+    gap: 20px;
+  }
+  h1 {
+    font-size: 36px;
+  }
+  .status span {
+    display: none;
+  }
+  .room-card {
+    min-width: 170px;
+  }
+  aside {
+    padding: 0;
+  }
+  .note {
+    min-height: 0;
+  }
+  footer {
+    flex-direction: column;
+  }
+}
+@media (max-width: 520px) {
+  .intro {
+    display: block;
+  }
+  .room-card {
+    margin-top: 20px;
+  }
+  .brand {
+    font-size: 23px;
+  }
+  .status {
+    font-size: 10px;
+  }
+  .brand span {
+    font-size: 7px;
+  }
+  .desktop {
+    display: none;
+  }
+  .canvas-tools > span {
+    font-size: 9px;
+  }
+  h1 {
+    font-size: 38px;
+  }
+}
