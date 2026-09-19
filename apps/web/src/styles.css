@@ -531,3 +531,45 @@ footer {
     animation-iteration-count: 1 !important;
   }
 }
+.voice-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-bottom: 8px;
+}
+.voice-input button {
+  border: 2px solid #3a1b6b;
+  border-radius: 999px;
+  padding: 5px 14px;
+  background: #fff;
+  color: #3a1b6b;
+  font-size: 12px;
+}
+.voice-input span {
+  font-size: 11px;
+  color: #6b5885;
+}
+.reaction {
+  margin: 12px 0 0;
+  padding-left: 12px;
+  border-left: 4px solid #7a5cc4;
+  color: #1f0c33;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.reaction small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #6b5885;
+}
+.reaction-delighted {
+  border-left-color: #4a9a5a;
+}
+.reaction-worried {
+  border-left-color: #d08a3a;
+}
+.reaction-curious {
+  border-left-color: #4a7fc0;
+}
