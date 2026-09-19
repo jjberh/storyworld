@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Storyworld voice test</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      h2 {
+        font-size: 1.1rem;
+        margin-top: 2rem;
+      }
+      button {
+        font: inherit;
+        padding: 0.4rem 0.9rem;
+        margin: 0 0.4rem 0.4rem 0;
+        cursor: pointer;
+      }
+      textarea {
+        width: 100%;
+        font: inherit;
+        box-sizing: border-box;
+      }
+      .status {
+        color: #555;
+      }
+      .caption {
+        font-size: 1.3rem;
+        min-height: 2.4rem;
+        padding: 0.6rem 0.8rem;
+        background: #f4efe6;
+        border-radius: 0.5rem;
+      }
+      pre {
+        background: #f6f6f6;
+        padding: 0.6rem;
+        white-space: pre-wrap;
+        max-height: 14rem;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Storyworld voice test</h1>
+    <p class="status">
+      Development page for the voice features; it is not part of the app.
+    </p>
+    <p id="health" class="status">Checking the API…</p>
+
+    <h2>1. Speak</h2>
+    <p>
+      Press start, say a sentence, then press stop. The final text appears below
+      and can be edited.
+    </p>
+    <button id="talk">Start listening</button>
+    <span id="listening" class="status"></span>
+    <p id="partial" class="status"></p>
+    <textarea
+      id="transcript"
+      rows="3"
+      placeholder="What you said appears here"
+    ></textarea>
+
+    <h2>2. Hear reactions</h2>
+    <p>
+      Each button sends a confirmed world event. The caption appears at once;
+      the voice follows.
+    </p>
+    <div>
+      <button data-scenario="open">Bridge opens the route</button>
+      <button data-scenario="short">Bridge is too short</button>
+      <button data-scenario="rain">Storm cloud brings rain</button>
+      <button data-scenario="reset">Reset the world (silent)</button>
+    </div>
+    <button id="again">Send the same event again (should stay silent)</button>
+    <p class="caption" id="caption"></p>
+    <p class="status" id="audio"></p>
+    <pre id="log"></pre>
+
+    <script
+      type="module"
+      src="/src/features/intelligence/voice-test.ts"
+    ></script>
+  </body>
+</html>

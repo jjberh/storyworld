@@ -20,7 +20,8 @@ it("returns explicit fixture operations and rejects malformed input", async () =
     const unavailable = await app.inject({
       url: "/api/elevenlabs/scribe-token",
     });
-    expect(unavailable.statusCode).toBe(501);
+    expect(unavailable.statusCode).toBe(503);
+    expect(unavailable.json().code).toBe("PROVIDER_NOT_CONFIGURED");
   } finally {
     await app.close();
   }
