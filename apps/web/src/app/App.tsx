@@ -288,7 +288,7 @@ export function FixtureExperience() {
           >
             {requestedGuest ? "Join" : "Create"} {room}
           </button>
-          <a href="/?mode=fixture">Use local fixture</a>
+          <a href="/?mode=fixture&fixture=nova">Use local fixture</a>
         </section>
       ) : (
         <section className="workspace">
@@ -402,7 +402,8 @@ export function FixtureExperience() {
                         "/join?mode=" +
                         mode +
                         "&world=" +
-                        world.id,
+                        world.id +
+                        "&fixture=nova",
                     );
                     setNote(
                       mode === "fixture"
@@ -610,8 +611,7 @@ export function FixtureExperience() {
 /** Nova is retained only for fixture demos and legacy browser coverage. */
 export function App() {
   const params = new URLSearchParams(location.search);
-  return params.get("mode") === "fixture" &&
-    params.get("fixture") === "nova" ? (
+  return params.get("fixture") === "nova" ? (
     <FixtureExperience />
   ) : (
     <InitialAuthoring />

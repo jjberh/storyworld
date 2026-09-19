@@ -39,6 +39,7 @@ export function InitialAuthoring() {
   const [phase, setPhase] = useState<Phase>("choice");
   const [draft, setDraft] = useState<SceneDraft>();
   const [error, setError] = useState("");
+  const interpreting = useRef(false);
   const upload = useRef<HTMLInputElement>(null);
   const canvasHost = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState(1000);
@@ -58,6 +59,17 @@ export function InitialAuthoring() {
     setPhase("authoring");
   }
 
+  function chooseAnother() {
+    setDraft(undefined);
+    setError("");
+    setPhase("choice");
+  }
+
+  function invalidateInterpretation() {
+    setError("");
+    setPhase("authoring");
+  }
+
   async function selectUpload(file?: File) {
     if (!file) return;
     try {
@@ -68,7 +80,8 @@ export function InitialAuthoring() {
   }
 
   async function bringWorldToLife() {
-    if (!draft) return;
+    if (!draft || interpreting.current) return;
+    interpreting.current = true;
     setPhase("reading");
     setError("");
     try {
@@ -83,6 +96,8 @@ export function InitialAuthoring() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setPhase("error");
+    } finally {
+      interpreting.current = false;
     }
   }
 
@@ -120,6 +135,8 @@ export function InitialAuthoring() {
             ref={upload}
             className="visually-hidden"
             type="file"
+            aria-label="Choose a drawing file"
+            tabIndex={-1}
             accept="image/png,image/jpeg,image/webp"
             onChange={(event) => {
               const file = event.target.files?.[0];
@@ -146,7 +163,7 @@ export function InitialAuthoring() {
           <button
             className="quiet choose-another"
             disabled={busy}
-            onClick={() => setPhase("choice")}
+            onClick={chooseAnother}
           >
             Choose another drawing
           </button>
@@ -196,7 +213,8 @@ export function InitialAuthoring() {
                   reference={draft.document.sourceImage}
                   referenceOpacity={1}
                   onFinish={(_bounds: Bounds, _image: string) => undefined}
-                  onChange={(drawing) =>
+                  onChange={(drawing) => {
+                    invalidateInterpretation();
                     setDraft((current) =>
                       current
                         ? {
@@ -205,8 +223,8 @@ export function InitialAuthoring() {
                             interpretation: undefined,
                           }
                         : current,
-                    )
-                  }
+                    );
+                  }}
                 />
               </div>
             </div>
@@ -219,7 +237,8 @@ export function InitialAuthoring() {
               placeholder="Tell us about your picture (optional)"
               maxLength={2000}
               disabled={busy}
-              onChange={(event) =>
+              onChange={(event) => {
+                invalidateInterpretation();
                 setDraft((current) =>
                   current
                     ? {
@@ -228,10 +247,11 @@ export function InitialAuthoring() {
                           ...current.document,
                           description: event.target.value || undefined,
                         },
+                        interpretation: undefined,
                       }
                     : current,
-                )
-              }
+                );
+              }}
             />
             <small>
               Use your own words. You can keep drawing whenever you want.
@@ -249,12 +269,15 @@ export function InitialAuthoring() {
             <button
               className="primary-action"
               disabled={busy}
-              onClick={() => setPhase("choice")}
+              onClick={chooseAnother}
             >
               Choose another drawing
             </button>
           </div>
-          <div className="proposals-card authoring-action-card">
+          <div
+            className="proposals-card authoring-action-card"
+            aria-busy={busy}
+          >
             <h2>The World Listens</h2>
             <p className="card-help">
               Storyworld uses your picture and words to find the beginning of

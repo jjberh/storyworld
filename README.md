@@ -45,7 +45,10 @@ cd storyworld
 docker compose up --build --wait
 ```
 
-Open [http://localhost:5173/?mode=fixture](http://localhost:5173/?mode=fixture). The API health endpoint is [http://localhost:3001/api/health](http://localhost:3001/api/health).
+Open [http://localhost:5173/?mode=fixture](http://localhost:5173/?mode=fixture)
+for the child-led authoring flow. The deterministic Nova demo remains available
+at [http://localhost:5173/?mode=fixture&fixture=nova](http://localhost:5173/?mode=fixture&fixture=nova).
+The API health endpoint is [http://localhost:3001/api/health](http://localhost:3001/api/health).
 
 Stop the services with:
 
@@ -146,7 +149,7 @@ The response uses the shared `SceneInterpretationResponse` contract. `imageBound
 
 Whole-scene requests may take 5-10 seconds. The browser client uses a 25-second abort for this endpoint and callers should show a non-blocking “reading your picture” state.
 
-In addition to the codes above, scene requests can return `IMAGE_REQUIRED` and `UNSUPPORTED_IMAGE` (400, not retryable: pick another picture) and `SCENE_NOT_RECOGNIZED` (422, retryable: no hero was found). The picture's bytes must match its declared type, so a mislabelled file is rejected before any model call.
+In addition to the codes above, scene requests can return `IMAGE_REQUIRED` and `UNSUPPORTED_IMAGE` (400, not retryable: pick another picture) and `SCENE_NOT_RECOGNIZED` (422, retryable: no character was found). The picture's bytes must match its declared type, so a mislabelled file is rejected before any model call.
 
 ## Josh: local and Maincloud database work
 
@@ -167,7 +170,15 @@ $env:VITE_SPACETIMEDB_DATABASE="storyworld-local"
 npm run dev -w @storyworld/web
 ```
 
-Use separate browser profiles for the director and guest, and choose a fresh room name for each run (for example, `?mode=live&world=josh-demo-1`). The browser profile that creates the room is its director; reopening that same profile with the same host, port, and database regains director access. A different profile is a contributor, even at the root room URL, and can propose rather than directly change the world. After accepting a change, refresh both profiles and use the timeline to rewind; both clients should converge on the same state. The live client reconnects after a short connection interruption and resends an interrupted reducer call once with its original request ID.
+The default live route still opens the authoring flow. To exercise the retained
+Nova collaboration fixture, use separate browser profiles and an explicit test
+URL such as `?mode=live&world=josh-demo-1&fixture=nova`. The browser profile
+that creates the room is its director; a different profile can contribute at
+`/join?mode=live&world=josh-demo-1&fixture=nova`. After accepting a change,
+refresh both profiles and use the timeline to rewind; both clients should
+converge on the same state. The live client reconnects after a short connection
+interruption and resends an interrupted reducer call once with its original
+request ID.
 
 To publish the tested module to the shared Maincloud database, first confirm that the module matches the intended empty database and do not use `--delete-data`:
 
