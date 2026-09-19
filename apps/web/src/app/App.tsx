@@ -75,8 +75,15 @@ export function App() {
         if (guest) await client.propose(candidate.operation);
         else await client.apply(candidate.operation);
       }
+      const committed = client.getSnapshot().world;
       setNote(
-        guest ? "Your proposal is ready for the director." : result.message,
+        guest
+          ? "Your proposal is ready for the director."
+          : committed?.pathStatus === "available"
+            ? "The bridge holds. Nova has a way through."
+            : committed?.entities.some((entity) => entity.kind === "bridge")
+              ? "Almost there — the bridge needs to reach both riverbanks."
+              : result.message,
       );
     });
   }
@@ -194,7 +201,7 @@ export function App() {
               </span>
             </div>
             <div className="paper" ref={container}>
-              <WorldStage world={world} />
+              <WorldStage world={world} latestEvent={snapshot.events.at(-1)} />
               <div className="drawing-layer">
                 <DrawingCanvas
                   key={
