@@ -82,6 +82,11 @@ export type ReactionCue = {
   emotion: StoryMood;
 };
 export interface WorldClient {
+  initializeScene(
+    id: string,
+    requestId: string,
+    scene: import("./index").ConfirmedScene,
+  ): Promise<void>;
   connect(): Promise<void>;
   subscribe(listener: () => void): () => void;
   getSnapshot(): ClientSnapshot;
@@ -95,6 +100,7 @@ export interface WorldClient {
   dispose(): void;
 }
 export type ClientSnapshot = {
+  scene?: import("./index").ConfirmedScene;
   status: "connecting" | "ready" | "error";
   error?: string;
   world: WorldState | null;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { DbConnection } from "../apps/web/src/module_bindings";
 import { bridgeOperation, cloudOperation } from "@storyworld/world-fixtures";
+import type { ConfirmedScene } from "@storyworld/contracts";
 const uri = process.env.TEST_DB_URI ?? "http://127.0.0.1:3010";
 const database = process.env.TEST_DB_NAME ?? "storyworld-foundation-check";
 if (!new URL(uri).hostname.match(/^(127\.0\.0\.1|localhost)$/))
@@ -37,6 +38,63 @@ const director = await connect(),
   guest = await connect();
 const worldId = "verify-" + Date.now();
 try {
+  const sceneId = "scene-" + Date.now();
+  const scene: ConfirmedScene = {
+    document: {
+      sourceImage: "picture",
+      drawing: { strokes: [], compositeImage: "picture" },
+      description: "A fox explores",
+    },
+    mode: "live",
+    objects: [
+      {
+        id: "fox",
+        name: "Fox",
+        kind: "character",
+        confidence: 1,
+        imageBounds: { x: 0.1, y: 0.2, width: 0.2, height: 0.2 },
+      },
+    ],
+    characterId: "fox",
+    openingNarration: "Fox explores.",
+    moodHints: ["curious"],
+  };
+  const sceneArgs = {
+    worldId: sceneId,
+    requestId: "scene-once",
+    scene: JSON.stringify(scene),
+  };
+  await assert.rejects(() =>
+    director.reducers.initializeScene({
+      ...sceneArgs,
+      scene: JSON.stringify({ ...scene, goalId: "missing" }),
+    }),
+  );
+  assert.equal(director.db.world.id.find(sceneId), null);
+  await director.reducers.initializeScene(sceneArgs);
+  await director.reducers.initializeScene(sceneArgs);
+  await until(() => !!guest.db.storyDocument.worldId.find(sceneId));
+  assert.equal(
+    [...guest.db.worldEvent.iter()].filter((e) => e.worldId === sceneId).length,
+    1,
+  );
+  assert.deepEqual(
+    JSON.parse(guest.db.storyDocument.worldId.find(sceneId)!.scene).document,
+    scene.document,
+  );
+  assert.deepEqual(
+    JSON.parse(
+      guest.db.worldEvent.id.find(sceneId + ":0")!.snapshot,
+    ).entities.map((e: { id: string }) => e.id),
+    ["fox"],
+  );
+  await assert.rejects(() => guest.reducers.initializeScene(sceneArgs));
+  await assert.rejects(() =>
+    director.reducers.initializeScene({
+      ...sceneArgs,
+      scene: JSON.stringify({ ...scene, openingNarration: "Different" }),
+    }),
+  );
   await director.reducers.createWorld({ worldId });
   await guest.reducers.joinWorld({ worldId });
   await until(() => !!guest.db.world.id.find(worldId));

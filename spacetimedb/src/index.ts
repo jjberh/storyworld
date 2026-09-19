@@ -12,6 +12,8 @@ import {
   summarize,
 } from "../../packages/contracts/src/simulation";
 import { operationSchema } from "../../packages/contracts/src/index";
+import { confirmedSceneSchema } from "../../packages/contracts/src/index";
+import { worldFromScene } from "../../packages/contracts/src/scene";
 import {
   SCHEMA_VERSION,
   type WorldState,
@@ -19,6 +21,14 @@ import {
   type WorldRule,
 } from "../../packages/contracts/src/model";
 const db = schema({
+  storyDocument: table(
+    { public: true },
+    {
+      worldId: t.string().primaryKey(),
+      requestId: t.string(),
+      scene: t.string(),
+    },
+  ),
   world: table(
     { public: true },
     {
@@ -215,6 +225,48 @@ export const joinWorld = db.reducer(
     const id = worldId + ":" + ctx.sender.toHexString();
     if (!ctx.db.participant.id.find(id))
       ctx.db.participant.insert({ id, worldId, identity: ctx.sender });
+  },
+);
+export const initializeScene = db.reducer(
+  { worldId: t.string(), requestId: t.string(), scene: t.string() },
+  (ctx, args) => {
+    if (
+      !args.requestId ||
+      args.requestId.length > 100 ||
+      args.scene.length > 10_000_000
+    )
+      throw new SenderError("Invalid scene request.");
+    const parsed = confirmedSceneSchema.safeParse(JSON.parse(args.scene));
+    if (!parsed.success) throw new SenderError("Invalid confirmed scene.");
+    const state = worldFromScene(args.worldId, parsed.data);
+    const canonical = JSON.stringify(parsed.data);
+    const existing = ctx.db.world.id.find(args.worldId);
+    if (existing) {
+      requireOwner(ctx, args.worldId);
+      const saved = ctx.db.storyDocument.worldId.find(args.worldId);
+      if (saved?.requestId === args.requestId && saved.scene === canonical)
+        return;
+      throw new SenderError(
+        "This world already exists with a different scene.",
+      );
+    }
+    ctx.db.world.insert({
+      id: args.worldId,
+      owner: ctx.sender,
+      revision: 0,
+      schemaVersion: SCHEMA_VERSION,
+    });
+    ctx.db.participant.insert({
+      id: args.worldId + ":" + ctx.sender.toHexString(),
+      worldId: args.worldId,
+      identity: ctx.sender,
+    });
+    ctx.db.storyDocument.insert({
+      worldId: args.worldId,
+      requestId: args.requestId,
+      scene: canonical,
+    });
+    commit(ctx, state, "Your confirmed story begins", args.requestId);
   },
 );
 // A single validated command endpoint keeps AI and manual edits on the same path.

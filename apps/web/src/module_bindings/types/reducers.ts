@@ -8,6 +8,7 @@ import { type Infer as __Infer } from "spacetimedb";
 // Import all reducer arg schemas
 import ApplyOperationCommandReducer from "../apply_operation_command_reducer";
 import CreateWorldReducer from "../create_world_reducer";
+import InitializeSceneReducer from "../initialize_scene_reducer";
 import JoinWorldReducer from "../join_world_reducer";
 import ResetDemoWorldReducer from "../reset_demo_world_reducer";
 import ResolveProposalReducer from "../resolve_proposal_reducer";
@@ -16,6 +17,7 @@ import SubmitProposalReducer from "../submit_proposal_reducer";
 
 export type ApplyOperationCommandParams = __Infer<typeof ApplyOperationCommandReducer>;
 export type CreateWorldParams = __Infer<typeof CreateWorldReducer>;
+export type InitializeSceneParams = __Infer<typeof InitializeSceneReducer>;
 export type JoinWorldParams = __Infer<typeof JoinWorldReducer>;
 export type ResetDemoWorldParams = __Infer<typeof ResetDemoWorldReducer>;
 export type ResolveProposalParams = __Infer<typeof ResolveProposalReducer>;

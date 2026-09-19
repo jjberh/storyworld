@@ -10,6 +10,7 @@ import {
   readDrawing,
 } from "../features/canvas/drawing-image";
 import { interpretScene } from "../services/intelligence-client";
+import { SceneConfirmation } from "./SceneConfirmation";
 
 type Phase = "choice" | "authoring" | "reading" | "error" | "ready";
 
@@ -39,6 +40,9 @@ export function InitialAuthoring() {
   const [phase, setPhase] = useState<Phase>("choice");
   const [draft, setDraft] = useState<SceneDraft>();
   const [error, setError] = useState("");
+  const [submittedDocument, setSubmittedDocument] = useState<StoryDocument>();
+  const [interpretationKey, setInterpretationKey] = useState(0);
+  const [creationLocked, setCreationLocked] = useState(false);
   const upload = useRef<HTMLInputElement>(null);
   const canvasHost = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState(1000);
@@ -79,6 +83,8 @@ export function InitialAuthoring() {
       setDraft((current) =>
         current ? { ...current, interpretation } : current,
       );
+      setSubmittedDocument(structuredClone(draft.document));
+      setInterpretationKey((key) => key + 1);
       setPhase("ready");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -137,7 +143,7 @@ export function InitialAuthoring() {
     );
 
   if (!draft) return null;
-  const busy = phase === "reading";
+  const busy = phase === "reading" || creationLocked;
   const strokeCount = draft.document.drawing.strokes.length;
   return (
     <main className="shell">
@@ -202,7 +208,6 @@ export function InitialAuthoring() {
                         ? {
                             ...current,
                             document: { ...current.document, drawing },
-                            interpretation: undefined,
                           }
                         : current,
                     )
@@ -272,8 +277,8 @@ export function InitialAuthoring() {
             )}
             {phase === "ready" && (
               <p className="draft-ready" role="status">
-                We found the beginnings of your world. Keep drawing, or bring it
-                to life again when you are ready.
+                We found the beginnings of your world. Check the objects and
+                story setup below before creating it.
               </p>
             )}
             <button
@@ -281,11 +286,13 @@ export function InitialAuthoring() {
               disabled={busy}
               onClick={() => void bringWorldToLife()}
             >
-              {busy
-                ? "Finding your world…"
-                : phase === "error"
-                  ? "Try bringing it to life again"
-                  : "Bring my world to life"}
+              {creationLocked
+                ? "Scene submitted"
+                : busy
+                  ? "Finding your world…"
+                  : phase === "error"
+                    ? "Try bringing it to life again"
+                    : "Bring my world to life"}
             </button>
           </div>
           <div className="moments-card authoring-moments-card">
@@ -300,7 +307,7 @@ export function InitialAuthoring() {
                 </strong>
                 <small>
                   {phase === "ready"
-                    ? "Next, you will confirm what Storyworld found"
+                    ? "Review what Storyworld found below"
                     : "Draw and describe what happens next"}
                 </small>
               </span>
@@ -308,6 +315,18 @@ export function InitialAuthoring() {
           </div>
         </aside>
       </section>
+      {draft.interpretation && submittedDocument && (
+        <SceneConfirmation
+          key={interpretationKey}
+          document={submittedDocument}
+          interpretation={draft.interpretation}
+          stale={
+            phase === "reading" ||
+            JSON.stringify(submittedDocument) !== JSON.stringify(draft.document)
+          }
+          onLocked={setCreationLocked}
+        />
+      )}
       <footer>
         <span>Built for small imaginations with big ideas.</span>
         <span>Your drawing stays yours while Storyworld listens.</span>

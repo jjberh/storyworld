@@ -36,6 +36,7 @@ import {
 // Import all reducer arg schemas
 import ApplyOperationCommandReducer from "./apply_operation_command_reducer";
 import CreateWorldReducer from "./create_world_reducer";
+import InitializeSceneReducer from "./initialize_scene_reducer";
 import JoinWorldReducer from "./join_world_reducer";
 import ResetDemoWorldReducer from "./reset_demo_world_reducer";
 import ResolveProposalReducer from "./resolve_proposal_reducer";
@@ -50,6 +51,7 @@ import GoalRow from "./goal_table";
 import MetadataRow from "./metadata_table";
 import ParticipantRow from "./participant_table";
 import ProposalRow from "./proposal_table";
+import StoryDocumentRow from "./story_document_table";
 import WorldRow from "./world_table";
 import WorldEventRow from "./world_event_table";
 import WorldRuleRow from "./world_rule_table";
@@ -122,6 +124,17 @@ const tablesSchema = __schema({
       { name: 'proposal_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ProposalRow),
+  storyDocument: __table({
+    name: 'story_document',
+    indexes: [
+      { accessor: 'worldId', name: 'story_document_world_id_idx_btree', algorithm: 'btree', columns: [
+        'worldId',
+      ] },
+    ],
+    constraints: [
+      { name: 'story_document_world_id_key', constraint: 'unique', columns: ['worldId'] },
+    ],
+  }, StoryDocumentRow),
   world: __table({
     name: 'world',
     indexes: [
@@ -167,6 +180,7 @@ const tablesSchema = __schema({
 const reducersSchema = __reducers(
   __reducerSchema("apply_operation_command", ApplyOperationCommandReducer),
   __reducerSchema("create_world", CreateWorldReducer),
+  __reducerSchema("initialize_scene", InitializeSceneReducer),
   __reducerSchema("join_world", JoinWorldReducer),
   __reducerSchema("reset_demo_world", ResetDemoWorldReducer),
   __reducerSchema("resolve_proposal", ResolveProposalReducer),

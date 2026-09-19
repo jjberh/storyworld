@@ -1,12 +1,14 @@
 # Foundation check
 
-This is the runnable foundation before the three feature implementations. Shared team ownership and pull request conventions are documented in `AGENTS.md`.
+This foundation includes initial authoring, object confirmation, and atomic creation of a world from a confirmed scene. Shared team ownership and pull request conventions are documented in `AGENTS.md`.
+
+The default page starts with a blank canvas or upload. Submit the picture and optional prompt, correct detected objects and their regions, accept each object, then create the world. Sample detections require explicit consent and only create a local test world. Changing the picture or prompt requires reinterpretation. The confirmed document is retained with the initial world event; animation of that picture is subsequent work. See README for the complete flow.
 
 ## Docker
 
 Run `docker compose up --build --wait`, then open http://localhost:5173. No API keys or local SpacetimeDB are required in default fixture mode. The dependency service refreshes the container-only node_modules volume so old images or Windows dependencies do not break onboarding.
 
-Click Add sample bridge: the route opens. Add storm cloud: rain appears. Reset world restores the river obstacle. Draw a bridge across both banks to exercise the Fastify fixture interpretation endpoint. Without a Gemini key it uses your selected tool and stroke bounds and labels the result as a fixture; with `GEMINI_API_KEY` set, Gemini identifies the drawing.
+The legacy Nova demo is available at `/?mode=fixture&fixture=nova`. Click Add sample bridge: the route opens. Add storm cloud: rain appears. Reset world restores the river obstacle.
 
 ## Native
 
@@ -22,7 +24,7 @@ The cloud database has not been modified. Live Maincloud requires publishing thi
 
 - Typed world operations, geometric bridge rule, revisions, idempotency, director authorization, guest proposals, event snapshots, reset and restore.
 - React shell, Konva stroke input, Pixi procedural scene, same-origin API proxy, mobile route, fixture/live adapters.
-- Drawing image capture with narration and stroke bounds, uploaded references (PNG/JPEG/WebP), ambiguous-interpretation choices, and retry without losing the drawing. Uploads are reference images for traced edits, not initial-scene generation. Drafts last for the current page only.
+- Drawing image capture with narration and stroke bounds, uploaded pictures (PNG/JPEG/WebP), scene confirmation, and retry without losing the drawing. Uploads are the initial-scene source in the default flow. Uncommitted drafts and local fixture worlds last for the current page only; live confirmed scenes are stored in the database.
 - Fastify `/api/interpret/edit`: live Gemini interpretation when `GEMINI_API_KEY` is set (schema-validated, recoverable errors), deterministic fixture otherwise. `/api/interpret/scene` turns an uploaded picture into a proposed initial scene; STT/TTS endpoints return explicit 501 until implemented.
 
 Audio, sophisticated animation/pathfinding, QR generation, and finished UX are feature work after this checkpoint. Fixture rooms are local and do not synchronize. Rewind restores semantic state as a new revision; it does not replay historical audio or raw strokes.

@@ -9,6 +9,11 @@ import {
   summarize,
 } from "@storyworld/contracts/simulation";
 export { initialWorld };
+import {
+  confirmedSceneSchema,
+  type ConfirmedScene,
+} from "@storyworld/contracts";
+import { worldFromScene } from "@storyworld/contracts/scene";
 export function bridgeOperation(
   id = "bridge-" + crypto.randomUUID(),
 ): WorldOperation {
@@ -34,6 +39,43 @@ export function cloudOperation(): WorldOperation {
   };
 }
 export class FixtureWorldClient implements WorldClient {
+  private initialization?: { id: string; requestId: string; payload: string };
+  constructor(empty = false) {
+    if (empty) this.snapshot = { ...this.snapshot, world: null };
+  }
+  async initializeScene(id: string, requestId: string, input: ConfirmedScene) {
+    const scene = confirmedSceneSchema.parse(input);
+    const world = worldFromScene(id, scene);
+    const payload = JSON.stringify(scene);
+    if (!requestId || requestId.length > 100)
+      throw new Error("Invalid request ID.");
+    if (this.initialization) {
+      if (
+        this.initialization.id === id &&
+        this.initialization.requestId === requestId &&
+        this.initialization.payload === payload
+      )
+        return;
+      throw new Error("This world already exists with a different scene.");
+    }
+    this.initialization = { id, requestId, payload };
+    this.snapshot = {
+      ...this.snapshot,
+      world,
+      scene,
+      events: [
+        {
+          id: id + ":0",
+          revision: 0,
+          actor: "You",
+          summary: "Your confirmed story begins",
+          state: world,
+        },
+      ],
+      proposals: [],
+    };
+    this.emit();
+  }
   private listeners = new Set<() => void>();
   private snapshot: ClientSnapshot = {
     status: "ready",

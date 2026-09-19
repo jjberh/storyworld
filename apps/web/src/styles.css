@@ -1,5 +1,45 @@
 @import "tailwindcss";
 
+.confirmation {
+  margin-top: 32px;
+}
+.confirmation-picture {
+  position: relative;
+  touch-action: none;
+}
+.confirmation-picture > img {
+  display: block;
+  width: 100%;
+}
+.object-region {
+  position: absolute;
+  border: 2px solid;
+  pointer-events: none;
+  font-weight: bold;
+}
+.confirmation fieldset {
+  border: 0;
+  padding: 8px 0;
+  min-width: 0;
+}
+.confirmation label {
+  display: block;
+  margin: 8px 0;
+}
+.confirmation input:not([type="checkbox"]),
+.confirmation select,
+.confirmation textarea {
+  max-width: 100%;
+  padding: 6px;
+  border: 1px solid #3a1b6b;
+  background: white;
+  color: #1f0c33;
+}
+.confirmation textarea {
+  width: 100%;
+  min-height: 100px;
+}
+
 :root {
   font-family: "Trebuchet MS", Arial, sans-serif;
   color: #1f0c33;

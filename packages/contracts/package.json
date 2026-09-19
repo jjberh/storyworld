@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./model": "./src/model.ts",
-    "./simulation": "./src/simulation.ts"
+    "./simulation": "./src/simulation.ts",
+    "./scene": "./src/scene.ts"
   },
   "dependencies": {
     "zod": "^4.1.0"

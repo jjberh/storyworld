@@ -162,3 +162,41 @@ export type InterpretationOutput = z.infer<typeof interpretationOutput>;
 export type DrawingData = z.infer<typeof drawingDataSchema>;
 export type StoryDocument = z.infer<typeof storyDocumentSchema>;
 export type SceneDraft = z.infer<typeof sceneDraftSchema>;
+
+export const confirmedSceneSchema = z
+  .object({
+    document: storyDocumentSchema,
+    mode: z.enum(["live", "fixture"]),
+    objects: z
+      .array(
+        sceneCandidateSchema.extend({ name: z.string().trim().min(1).max(80) }),
+      )
+      .min(1)
+      .max(20),
+    characterId: z.string().min(1),
+    goalId: z.string().optional(),
+    fearedRiverId: z.string().optional(),
+    openingNarration: z.string().trim().min(1).max(600),
+    moodHints: z.array(storyMoodSchema).min(1).max(3),
+  })
+  .strict()
+  .superRefine((scene, ctx) => {
+    const objects = new Map(scene.objects.map((o) => [o.id, o]));
+    const issue = (message: string) =>
+      ctx.addIssue({ code: "custom", message });
+    if (objects.size !== scene.objects.length)
+      issue("Object IDs must be unique.");
+    if (
+      scene.objects.filter((o) => o.kind === "character").length !== 1 ||
+      objects.get(scene.characterId)?.kind !== "character"
+    )
+      issue("Choose exactly one main character.");
+    if (scene.goalId && objects.get(scene.goalId)?.kind !== "castle")
+      issue("Choose a confirmed castle as the destination.");
+    if (
+      scene.fearedRiverId &&
+      objects.get(scene.fearedRiverId)?.kind !== "river"
+    )
+      issue("Choose a confirmed river for the fear rule.");
+  });
+export type ConfirmedScene = z.infer<typeof confirmedSceneSchema>;
