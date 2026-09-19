@@ -11,6 +11,15 @@ import {
 import { FixtureWorldClient } from "@storyworld/world-fixtures";
 import { LiveWorldClient } from "../services/world-client";
 
+const kindLabels: Record<SceneCandidate["kind"], string> = {
+  character: "Main character",
+  castle: "A place to visit",
+  river: "A river",
+  bridge: "A bridge",
+  cloud: "A cloud",
+  shelter: "A cozy place",
+};
+
 export function SceneConfirmation({
   document,
   interpretation,
@@ -26,11 +35,8 @@ export function SceneConfirmation({
   const [accepted, setAccepted] = useState<string[]>([]);
   const [selected, setSelected] = useState(interpretation.characterCandidateId);
   const [adding, setAdding] = useState(false);
-  const [goalId, setGoalId] = useState(interpretation.goalCandidateId ?? "");
-  const [fearedRiverId, setFearedRiverId] = useState("");
-  const [openingNarration, setNarration] = useState(
-    interpretation.openingNarration,
-  );
+  const [moving, setMoving] = useState(false);
+  const [changing, setChanging] = useState(false);
   const [fixtureConsent, setFixtureConsent] = useState(false);
   const [status, setStatus] = useState<
     "review" | "creating" | "failed" | "committed"
@@ -42,13 +48,23 @@ export function SceneConfirmation({
   >(undefined);
   const start = useRef<{ x: number; y: number } | undefined>(undefined);
   const locked = status !== "review";
+  const selectedObject =
+    objects.find((object) => object.id === selected) ?? objects[0];
+  const allChecked =
+    objects.length > 0 &&
+    objects.every((object) => accepted.includes(object.id));
+
   useEffect(() => () => client.current?.dispose(), []);
+
   function update(id: string, patch: Partial<SceneCandidate>) {
     setObjects((current) =>
-      current.map((o) => (o.id === id ? { ...o, ...patch } : o)),
+      current.map((object) =>
+        object.id === id ? { ...object, ...patch } : object,
+      ),
     );
     setAccepted((current) => current.filter((value) => value !== id));
   }
+
   function point(event: React.PointerEvent<HTMLDivElement>) {
     const box = event.currentTarget.getBoundingClientRect();
     return {
@@ -56,32 +72,65 @@ export function SceneConfirmation({
       y: Math.max(0, Math.min(1, (event.clientY - box.top) / box.height)),
     };
   }
+
+  function chooseNext(currentId: string) {
+    const next = objects.find(
+      (object) => object.id !== currentId && !accepted.includes(object.id),
+    );
+    if (next) setSelected(next.id);
+  }
+
+  function sayYes() {
+    if (!selectedObject) return;
+    setAccepted((current) =>
+      current.includes(selectedObject.id)
+        ? current
+        : [...current, selectedObject.id],
+    );
+    setChanging(false);
+    chooseNext(selectedObject.id);
+  }
+
+  function removeSelected() {
+    if (!selectedObject) return;
+    const remaining = objects.filter((object) => object.id !== selectedObject.id);
+    setObjects(remaining);
+    setAccepted((current) => current.filter((id) => id !== selectedObject.id));
+    setSelected(remaining[0]?.id ?? "");
+    setChanging(false);
+  }
+
   async function create() {
     if (stale || status === "creating" || status === "committed") return;
     setError("");
     if (!pending.current) {
-      if (objects.some((o) => !accepted.includes(o.id))) {
-        setError("Check each object before creating your world.");
+      if (!allChecked) {
+        setError("Give every picture part a quick check first.");
         return;
       }
       if (interpretation.mode === "fixture" && !fixtureConsent) {
-        setError(
-          "Confirm that you want to use the sample detections for a local test.",
-        );
+        setError("Choose the practice reading before starting this test story.");
         return;
       }
       const result = confirmedSceneSchema.safeParse({
         document,
         mode: interpretation.mode,
         objects,
-        characterId: objects.find((o) => o.kind === "character")?.id ?? "",
-        goalId: goalId || undefined,
-        fearedRiverId: fearedRiverId || undefined,
-        openingNarration,
+        characterId:
+          objects.find((object) => object.kind === "character")?.id ?? "",
+        goalId: objects.some(
+          (object) => object.id === interpretation.goalCandidateId,
+        )
+          ? interpretation.goalCandidateId
+          : undefined,
+        fearedRiverId: objects.find((object) => object.kind === "river")?.id,
+        openingNarration: interpretation.openingNarration,
         moodHints: interpretation.moodHints,
       });
       if (!result.success) {
-        setError(result.error.issues[0]!.message);
+        setError(
+          result.error.issues[0]?.message ?? "Choose one main character.",
+        );
         return;
       }
       pending.current = {
@@ -89,7 +138,6 @@ export function SceneConfirmation({
         requestId: crypto.randomUUID(),
         scene: result.data,
       };
-      // Fixture candidates can only create a labelled local test world.
       const mode =
         new URLSearchParams(location.search).get("mode") ??
         import.meta.env.VITE_WORLD_MODE ??
@@ -109,40 +157,22 @@ export function SceneConfirmation({
         pending.current.scene,
       );
       if (client.current!.getSnapshot().world?.id !== pending.current.id)
-        throw new Error(
-          "The committed world has not arrived yet. Retry safely.",
-        );
+        throw new Error("Your story is taking a moment. Try again safely.");
       setStatus("committed");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setStatus("failed");
     }
   }
+
   return (
-    <section className="confirmation workspace" aria-label="Confirm your scene">
-      <div className="paper-column">
-        <h2>Check what is in your picture</h2>
-        {stale && (
-          <p role="alert">
-            Your picture or story words changed. Bring your world to life again
-            before confirming.
-          </p>
-        )}
-        {interpretation.mode === "fixture" && (
-          <p role="alert">
-            These are sample detections, not Gemini’s reading of your picture.
-            They can only create a local test world.
-          </p>
-        )}
-        <p>
-          Select an object, then drag across the picture to change its region.
-          Choose “Add a missed object” to mark a new one.
-        </p>
+    <section className="picture-check" aria-label="Check your picture">
+      <div className="paper picture-check-paper">
         <div
           className="confirmation-picture"
-          aria-label="Object regions"
+          aria-label="Your picture with detected objects"
           onPointerDown={(event) => {
-            if (locked || stale) return;
+            if (locked || stale || (!adding && !moving)) return;
             start.current = point(event);
             event.currentTarget.setPointerCapture(event.pointerId);
           }}
@@ -150,9 +180,9 @@ export function SceneConfirmation({
             start.current = undefined;
           }}
           onPointerUp={(event) => {
-            if (!start.current || locked || stale) return;
-            const end = point(event),
-              begin = start.current;
+            if (!start.current || locked || stale || (!adding && !moving)) return;
+            const end = point(event);
+            const begin = start.current;
             start.current = undefined;
             const imageBounds = {
               x: Math.min(begin.x, end.x),
@@ -160,7 +190,8 @@ export function SceneConfirmation({
               width: Math.abs(end.x - begin.x),
               height: Math.abs(end.y - begin.y),
             };
-            if (imageBounds.width < 0.005 || imageBounds.height < 0.005) return;
+            if (imageBounds.width < 0.005 || imageBounds.height < 0.005)
+              return;
             if (adding) {
               const id = "object-" + crypto.randomUUID();
               setObjects((current) => [
@@ -169,213 +200,191 @@ export function SceneConfirmation({
               ]);
               setSelected(id);
               setAdding(false);
-            } else update(selected, { imageBounds });
+              setChanging(true);
+            } else if (selectedObject) {
+              update(selectedObject.id, { imageBounds });
+              setMoving(false);
+            }
           }}
         >
           <img
             src={document.drawing.compositeImage}
-            alt="Your submitted picture"
+            alt="Your drawing"
             draggable={false}
           />
-          {objects.map((o, i) => (
-            <span
-              key={o.id}
+          {objects.map((object) => (
+            <button
+              key={object.id}
               className="object-region"
+              aria-label={`Check ${object.name || "new object"}`}
+              aria-pressed={selected === object.id}
+              disabled={locked || stale}
+              onClick={() => {
+                setSelected(object.id);
+                setAdding(false);
+                setMoving(false);
+                setChanging(false);
+              }}
               style={{
-                left: `${o.imageBounds.x * 100}%`,
-                top: `${o.imageBounds.y * 100}%`,
-                width: `${o.imageBounds.width * 100}%`,
-                height: `${o.imageBounds.height * 100}%`,
-                borderColor: selected === o.id ? "#ff7a00" : "#6c30a3",
+                left: `${object.imageBounds.x * 100}%`,
+                top: `${object.imageBounds.y * 100}%`,
+                width: `${object.imageBounds.width * 100}%`,
+                height: `${object.imageBounds.height * 100}%`,
               }}
             >
-              {i + 1}
-            </span>
-          ))}
-        </div>
-        <button
-          className="secondary-action"
-          disabled={locked || stale || objects.length >= 20}
-          onClick={() => setAdding(true)}
-        >
-          {adding ? "Drag a region on the picture" : "Add a missed object"}
-        </button>
-        <fieldset disabled={locked || stale}>
-          <legend>Objects</legend>
-          {objects.map((object, i) => (
-            <div className="proposal" key={object.id}>
-              <button
-                aria-pressed={selected === object.id}
-                onClick={() => {
-                  setSelected(object.id);
-                  setAdding(false);
-                }}
-              >
-                Select object {i + 1}
-              </button>
-              {object.confidence < 0.8 && (
-                <p>Please check this uncertain detection.</p>
-              )}
-              <label>
-                Name{" "}
-                <input
-                  aria-label={`Object ${i + 1} name`}
-                  value={object.name}
-                  maxLength={80}
-                  onChange={(e) => update(object.id, { name: e.target.value })}
-                />
-              </label>
-              <label>
-                Type{" "}
-                <select
-                  aria-label={`Object ${i + 1} type`}
-                  value={object.kind}
-                  onChange={(e) =>
-                    update(object.id, {
-                      kind: entitySchema.shape.kind.parse(e.target.value),
-                    })
-                  }
-                >
-                  {entitySchema.shape.kind.options.map((kind) => (
-                    <option key={kind}>{kind}</option>
-                  ))}
-                </select>
-              </label>
-              <details>
-                <summary>Adjust region with numbers (0 to 1)</summary>
-                {(["x", "y", "width", "height"] as const).map((key) => (
-                  <label key={key}>
-                    {key}
-                    <input
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={object.imageBounds[key]}
-                      onChange={(e) =>
-                        update(object.id, {
-                          imageBounds: {
-                            ...object.imageBounds,
-                            [key]: Number(e.target.value),
-                          },
-                        })
-                      }
-                    />
-                  </label>
-                ))}
-              </details>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={accepted.includes(object.id)}
-                  onChange={(e) =>
-                    setAccepted((current) =>
-                      e.target.checked
-                        ? [...current, object.id]
-                        : current.filter((id) => id !== object.id),
-                    )
-                  }
-                />{" "}
-                This object is correct
-              </label>
-              <button
-                onClick={() => {
-                  setObjects((current) =>
-                    current.filter((o) => o.id !== object.id),
-                  );
-                  if (goalId === object.id) setGoalId("");
-                  if (fearedRiverId === object.id) setFearedRiverId("");
-                }}
-              >
-                Remove object {i + 1}
-              </button>
-            </div>
-          ))}
-        </fieldset>
-      </div>
-      <aside>
-        <div className="proposals-card">
-          <h2>Set the beginning</h2>
-          <fieldset disabled={locked || stale}>
-            <p>
-              Keep exactly one object with the character type as your main
-              character.
-            </p>
-            <label>
-              Destination (optional)
-              <select
-                value={goalId}
-                onChange={(e) => setGoalId(e.target.value)}
-              >
-                <option value="">No destination yet</option>
-                {objects
-                  .filter((o) => o.kind === "castle")
-                  .map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Afraid of a river? (optional)
-              <select
-                value={fearedRiverId}
-                onChange={(e) => setFearedRiverId(e.target.value)}
-              >
-                <option value="">No fear rule</option>
-                {objects
-                  .filter((o) => o.kind === "river")
-                  .map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Story opening
-              <textarea
-                value={openingNarration}
-                maxLength={600}
-                onChange={(e) => setNarration(e.target.value)}
-              />
-            </label>
-            {interpretation.mode === "fixture" && (
-              <label>
-                <input
-                  type="checkbox"
-                  checked={fixtureConsent}
-                  onChange={(e) => setFixtureConsent(e.target.checked)}
-                />{" "}
-                Use sample detections for a local test
-              </label>
-            )}
-          </fieldset>
-          {error && <p role="alert">{error}</p>}
-          {status === "committed" ? (
-            <p role="status">
-              {client.current?.getSnapshot().mode === "fixture"
-                ? "Local test world created"
-                : "World created"}
-              : {pending.current?.id}. Your confirmed picture and story are
-              attached.
-            </p>
-          ) : (
-            <button
-              className="primary-action"
-              disabled={stale || status === "creating"}
-              onClick={() => void create()}
-            >
-              {status === "creating"
-                ? "Creating your world…"
-                : status === "failed"
-                  ? "Retry world creation"
-                  : "Create confirmed world"}
+              {object.name || "?"}
             </button>
+          ))}
+          {(adding || moving) && (
+            <p className="draw-a-circle">
+              {adding
+                ? "Draw a box around what we missed"
+                : "Draw a new box around it"}
+            </p>
           )}
         </div>
-      </aside>
+      </div>
+
+      <div className="picture-check-card">
+        {stale ? (
+          <p role="alert">
+            Your picture changed. Bring it to life again, then check it here.
+          </p>
+        ) : status === "committed" ? (
+          <p role="status">
+            Your story is ready. Your drawing and words are safely attached.
+          </p>
+        ) : adding || moving ? (
+          <p>
+            {adding
+              ? "Draw a box around the part we missed."
+              : "Draw a new box around the picture part."}
+          </p>
+        ) : selectedObject ? (
+          <>
+            <p className="check-progress">
+              Picture part {objects.findIndex((object) => object.id === selectedObject.id) + 1} of {objects.length}
+            </p>
+            <h2>
+              {accepted.includes(selectedObject.id)
+                ? "Nice catch!"
+                : `Is this ${selectedObject.name || "something"}?`}
+            </h2>
+            {changing && (
+              <div className="change-object">
+                <label>
+                  What should we call it?
+                  <input
+                    aria-label="What should we call it?"
+                    value={selectedObject.name}
+                    maxLength={80}
+                    autoFocus
+                    onChange={(event) =>
+                      update(selectedObject.id, { name: event.target.value })
+                    }
+                  />
+                </label>
+                <button
+                  className="quiet-action redraw-region"
+                  disabled={locked}
+                  onClick={() => {
+                    setMoving(true);
+                    setAdding(false);
+                  }}
+                >
+                  Draw a new box around it
+                </button>
+                <label>
+                  What kind of thing is it?
+                  <select
+                    aria-label="What kind of thing is it?"
+                    value={selectedObject.kind}
+                    onChange={(event) =>
+                      update(selectedObject.id, {
+                        kind: entitySchema.shape.kind.parse(event.target.value),
+                      })
+                    }
+                  >
+                    {entitySchema.shape.kind.options.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {kindLabels[kind]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
+            <div className="picture-check-actions">
+              <button
+                className="primary-action"
+                disabled={locked}
+                onClick={sayYes}
+              >
+                Yes, that&apos;s right!
+              </button>
+              <button
+                className="secondary-action"
+                disabled={locked}
+                onClick={() => setChanging(true)}
+              >
+                Change it
+              </button>
+              <button
+                className="quiet-action"
+                disabled={locked}
+                onClick={removeSelected}
+              >
+                That is not in my picture
+              </button>
+            </div>
+          </>
+        ) : (
+          <p>Add your main character by drawing a box around them.</p>
+        )}
+
+        {status !== "committed" && (
+          <button
+            className="add-missed"
+            disabled={locked || stale || objects.length >= 20}
+              onClick={() => {
+                setAdding(true);
+                setMoving(false);
+                setChanging(false);
+            }}
+          >
+            I missed something
+          </button>
+        )}
+        {interpretation.mode === "fixture" && status !== "committed" && (
+          <label className="fixture-consent">
+            <input
+              type="checkbox"
+              checked={fixtureConsent}
+              disabled={locked}
+              onChange={(event) => setFixtureConsent(event.target.checked)}
+            />{" "}
+            Use this practice reading
+          </label>
+        )}
+        {error && (
+          <p className="authoring-error" role="alert">
+            {error}
+          </p>
+        )}
+        {status !== "committed" && allChecked && !adding && !moving && (
+          <button
+            className="start-story"
+            disabled={stale || status === "creating"}
+            onClick={() => void create()}
+          >
+            {status === "creating"
+              ? "Starting your story…"
+              : status === "failed"
+                ? "Try starting my story again"
+                : "Start my story"}
+          </button>
+        )}
+      </div>
     </section>
   );
 }

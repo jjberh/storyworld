@@ -145,6 +145,9 @@ export function InitialAuthoring() {
   if (!draft) return null;
   const busy = phase === "reading" || creationLocked;
   const strokeCount = draft.document.drawing.strokes.length;
+  const hasStaleInterpretation =
+    !!submittedDocument &&
+    JSON.stringify(submittedDocument) !== JSON.stringify(draft.document);
   return (
     <main className="shell">
       <StoryworldHeader
@@ -191,30 +194,40 @@ export function InitialAuthoring() {
                 : `${strokeCount} ${strokeCount === 1 ? "mark" : "marks"} on the page`}
             </span>
           </div>
-          <div className="authoring-paper-wrap">
+          <div className="authoring-paper-wrap" ref={canvasHost}>
             <img className="authoring-scribble" src={scribblesImage} alt="" />
             <img className="authoring-sun" src={sunIcon} alt="" />
-            <div className="paper authoring-paper" ref={canvasHost}>
-              <div className="drawing-layer">
-                <DrawingCanvas
-                  width={canvasWidth}
-                  disabled={busy}
-                  reference={draft.document.sourceImage}
-                  referenceOpacity={1}
-                  onFinish={(_bounds: Bounds, _image: string) => undefined}
-                  onChange={(drawing) =>
-                    setDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            document: { ...current.document, drawing },
-                          }
-                        : current,
-                    )
-                  }
-                />
+            {draft.interpretation && submittedDocument ? (
+              <SceneConfirmation
+                key={interpretationKey}
+                document={submittedDocument}
+                interpretation={draft.interpretation}
+                stale={phase === "reading" || hasStaleInterpretation}
+                onLocked={setCreationLocked}
+              />
+            ) : (
+              <div className="paper authoring-paper">
+                <div className="drawing-layer">
+                  <DrawingCanvas
+                    width={canvasWidth}
+                    disabled={busy}
+                    reference={draft.document.sourceImage}
+                    referenceOpacity={1}
+                    onFinish={(_bounds: Bounds, _image: string) => undefined}
+                    onChange={(drawing) =>
+                      setDraft((current) =>
+                        current
+                          ? {
+                              ...current,
+                              document: { ...current.document, drawing },
+                            }
+                          : current,
+                      )
+                    }
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </div>
           <div className="narration">
             <label htmlFor="description">What happens in your story?</label>
@@ -275,25 +288,26 @@ export function InitialAuthoring() {
                 {error}
               </p>
             )}
-            {phase === "ready" && (
+            {phase === "ready" && !hasStaleInterpretation ? (
               <p className="draft-ready" role="status">
-                We found the beginnings of your world. Check the objects and
-                story setup below before creating it.
+                I found some parts of your picture. Check them right on the
+                page.
               </p>
+            ) : (
+              <button
+                className="primary-action"
+                disabled={busy}
+                onClick={() => void bringWorldToLife()}
+              >
+                {creationLocked
+                  ? "Scene submitted"
+                  : busy
+                    ? "Finding your world…"
+                    : phase === "error"
+                      ? "Try bringing it to life again"
+                      : "Bring my world to life"}
+              </button>
             )}
-            <button
-              className="primary-action"
-              disabled={busy}
-              onClick={() => void bringWorldToLife()}
-            >
-              {creationLocked
-                ? "Scene submitted"
-                : busy
-                  ? "Finding your world…"
-                  : phase === "error"
-                    ? "Try bringing it to life again"
-                    : "Bring my world to life"}
-            </button>
           </div>
           <div className="moments-card authoring-moments-card">
             <h2>Story Moments</h2>
@@ -307,7 +321,7 @@ export function InitialAuthoring() {
                 </strong>
                 <small>
                   {phase === "ready"
-                    ? "Review what Storyworld found below"
+                    ? "Check what Storyworld found on your picture"
                     : "Draw and describe what happens next"}
                 </small>
               </span>
@@ -315,18 +329,6 @@ export function InitialAuthoring() {
           </div>
         </aside>
       </section>
-      {draft.interpretation && submittedDocument && (
-        <SceneConfirmation
-          key={interpretationKey}
-          document={submittedDocument}
-          interpretation={draft.interpretation}
-          stale={
-            phase === "reading" ||
-            JSON.stringify(submittedDocument) !== JSON.stringify(draft.document)
-          }
-          onLocked={setCreationLocked}
-        />
-      )}
       <footer>
         <span>Built for small imaginations with big ideas.</span>
         <span>Your drawing stays yours while Storyworld listens.</span>

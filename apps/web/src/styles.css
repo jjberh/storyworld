@@ -1,43 +1,52 @@
 @import "tailwindcss";
 
-.confirmation {
-  margin-top: 32px;
-}
 .confirmation-picture {
   position: relative;
+  height: 100%;
   touch-action: none;
 }
 .confirmation-picture > img {
   display: block;
   width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .object-region {
   position: absolute;
-  border: 2px solid;
-  pointer-events: none;
-  font-weight: bold;
-}
-.confirmation fieldset {
-  border: 0;
-  padding: 8px 0;
-  min-width: 0;
-}
-.confirmation label {
-  display: block;
-  margin: 8px 0;
-}
-.confirmation input:not([type="checkbox"]),
-.confirmation select,
-.confirmation textarea {
-  max-width: 100%;
-  padding: 6px;
-  border: 1px solid #3a1b6b;
-  background: white;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 5px;
   color: #1f0c33;
+  background: transparent;
+  border: 3px solid #ff7a00;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
-.confirmation textarea {
-  width: 100%;
-  min-height: 100px;
+.object-region[aria-pressed="true"] {
+  color: #3a1b6b;
+  background: rgb(255 249 219 / 18%);
+  border-color: #6c30a3;
+  box-shadow: 0 0 0 2px #fff9db;
+}
+.draw-a-circle {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  margin: 0;
+  padding: 8px 10px;
+  color: #fff;
+  background: #6c30a3;
+  border: 2px solid #3a1b6b;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: bold;
 }
 
 :root {
@@ -662,6 +671,93 @@ footer {
 .authoring-paper-wrap .authoring-paper {
   z-index: 1;
 }
+.picture-check {
+  position: relative;
+  z-index: 1;
+}
+.picture-check-paper {
+  aspect-ratio: 5 / 3;
+}
+.picture-check-card {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px;
+  background: #f0e9fc;
+  border: 3px solid #3a1b6b;
+  border-radius: 12px;
+}
+.picture-check-card p,
+.picture-check-card h2 {
+  margin: 0;
+}
+.picture-check-card h2 {
+  font-size: 22px;
+}
+.check-progress {
+  color: #6b5885;
+  font-size: 12px;
+  font-weight: 900;
+}
+.picture-check-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+.picture-check-actions .quiet-action {
+  grid-column: span 2;
+}
+.quiet-action,
+.add-missed {
+  justify-self: start;
+  padding: 4px 0;
+  color: #3a1b6b;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid currentColor;
+  font-size: 12px;
+  font-weight: 900;
+}
+.change-object {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.change-object label,
+.fixture-consent {
+  display: grid;
+  gap: 5px;
+  color: #3a1b6b;
+  font-size: 12px;
+  font-weight: 900;
+}
+.change-object input,
+.change-object select {
+  width: 100%;
+  padding: 8px;
+  color: #1f0c33;
+  background: #fff;
+  border: 2px solid #3a1b6b;
+  border-radius: 6px;
+  font: inherit;
+}
+.redraw-region {
+  grid-column: span 2;
+}
+.fixture-consent {
+  display: block;
+}
+.start-story {
+  width: 100%;
+  padding: 13px 16px;
+  color: #fff;
+  background: #ff7a00;
+  border: 3px solid #3a1b6b;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 900;
+}
 .authoring-scribble {
   top: -22px;
   right: -68px;
@@ -732,5 +828,15 @@ footer {
   .authoring-scribble,
   .authoring-sun {
     display: none;
+  }
+  .change-object,
+  .picture-check-actions {
+    grid-template-columns: 1fr;
+  }
+  .picture-check-actions .quiet-action {
+    grid-column: auto;
+  }
+  .redraw-region {
+    grid-column: auto;
   }
 }
