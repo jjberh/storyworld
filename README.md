@@ -11,7 +11,7 @@ Add a storm cloud -> the world becomes rainy.
 Reset or rewind -> the semantic world returns to an earlier revision.
 ```
 
-Gemini interpretation and ElevenLabs speech are not silently faked. Their foundation API routes return an explicit fixture response or `501` until those integrations are implemented.
+Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` and the ElevenLabs routes still return a fixture response or `501` until those integrations are implemented.
 
 ## Shared integration contracts
 
@@ -77,7 +77,21 @@ GEMINI_API_KEY=
 ELEVENLABS_API_KEY=
 ```
 
+Optional server settings: `GEMINI_MODEL` (default `gemini-3.6-flash`) and `GEMINI_TIMEOUT_MS` (default `8000`, kept below the browser's 10 second abort).
+
 Never prefix provider secrets with `VITE_`, commit `.env`, or paste keys into an issue, chat, screenshot, or pull request.
+
+### Gemini interpretation behavior
+
+With a key, `/api/interpret/edit` sends the narration and drawing to Gemini with a structured-output schema. Gemini only chooses what the child added (`bridge`, `cloud`, or `shelter`), a friendly name, and a confidence; the server builds the `CREATE_ENTITY` operation with its own ID and the drawn `changedRegion` as bounds, then validates it with the shared contract. Nothing from the model writes to SpacetimeDB. `/api/health` reports `providerMode` as `live` or `fixture`.
+
+If Gemini fails, the route does not fall back to the fixture. It returns a recoverable error and the drawing is untouched:
+
+```json
+{ "code": "PROVIDER_TIMEOUT", "message": "…", "retryable": true }
+```
+
+Codes: `PROVIDER_TIMEOUT` (504), `PROVIDER_RATE_LIMITED` (503), `PROVIDER_UNAVAILABLE`, `PROVIDER_FAILED`, `PROVIDER_AUTH_FAILED`, `INVALID_MODEL_OUTPUT` (502), and `INVALID_INPUT` (400). Remove the key to run the fixture flow.
 
 ## Josh: local and Maincloud database work
 
