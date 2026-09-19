@@ -1,0 +1,22 @@
+FROM node:24-bookworm-slim AS base
+
+WORKDIR /workspace
+
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false
+
+FROM base AS dependencies
+
+COPY . .
+RUN if [ -f package-lock.json ]; then npm ci; fi
+
+FROM dependencies AS development
+
+EXPOSE 3001 5173
+CMD ["npm", "run", "dev"]
+
+FROM base AS smoke
+
+COPY docker/smoke-server.mjs /opt/storyworld/smoke-server.mjs
+EXPOSE 8080
+CMD ["node", "/opt/storyworld/smoke-server.mjs"]
