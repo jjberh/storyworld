@@ -66,9 +66,8 @@ export function WorldStage({
             eventElapsed += t.deltaMS;
           }
           const bridgeEvent = latest?.summary.toLowerCase().includes("bridge");
-          const reveal = reduceMotion || !bridgeEvent
-            ? 1
-            : Math.min(1, eventElapsed / 700);
+          const reveal =
+            reduceMotion || !bridgeEvent ? 1 : Math.min(1, eventElapsed / 700);
           const w = state.current;
           g.clear();
           g.ellipse(200, 555, 450, 130).fill("#d2e1b2");
@@ -86,14 +85,6 @@ export function WorldStage({
                   2,
                 ).fill("#cce4dd");
             }
-            if (e.kind === "castle") {
-              g.roundRect(b.x, b.y, b.width, b.height, 8).fill("#e1b087");
-              g.rect(b.x - 10, b.y - 30, 40, b.height + 30).fill("#cf956f");
-              g.rect(b.x + b.width - 30, b.y - 30, 40, b.height + 30).fill(
-                "#cf956f",
-              );
-              g.roundRect(b.x + 50, b.y + 75, 40, 75, 18).fill("#855f52");
-            }
             if (e.kind === "bridge") {
               const shownWidth = Math.max(8, b.width * reveal);
               const nearMiss = w.pathStatus === "blocked";
@@ -106,12 +97,9 @@ export function WorldStage({
                 );
               if (nearMiss) {
                 g.rect(b.x - 5, b.y - 8, 8, b.height + 16).fill("#d45f50");
-                g.rect(
-                  b.x + b.width - 3,
-                  b.y - 8,
-                  8,
-                  b.height + 16,
-                ).fill("#d45f50");
+                g.rect(b.x + b.width - 3, b.y - 8, 8, b.height + 16).fill(
+                  "#d45f50",
+                );
               }
             }
             if (e.kind === "cloud") {
@@ -156,7 +144,8 @@ export function WorldStage({
           nova.position.set(x + blockedWobble, 340 + Math.sin(clock * 4) * 3);
           label.position.set(x - 30, 395);
           if (w.pathStatus === "available") {
-            cue.text = reveal < 1 ? "A way through!" : "Nova can reach the castle";
+            cue.text =
+              reveal < 1 ? "A way through!" : "Nova can reach the castle";
             cue.style.fill = "#315445";
             cue.position.set(510, 250);
           } else if (w.entities.some((e) => e.kind === "bridge")) {

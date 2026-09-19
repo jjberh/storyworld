@@ -8,6 +8,7 @@ test("fixture bridge opens route, cloud brings rain, and reset restores world", 
   await expect(
     page.getByText("Route opened", { exact: false }).first(),
   ).toBeVisible();
+  await expect(page.getByLabel("Nova’s route is available")).toBeVisible();
   await page.getByRole("button", { name: "Add storm cloud" }).click();
   await expect(
     page.getByRole("button", { name: /Storm cloud added/ }),
