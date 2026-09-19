@@ -1,5 +1,14 @@
 import { z } from "zod";
 export * from "./model";
+// Types only: the schemas import `storyMoodSchema` from this file, so a value
+// re-export would be a circular import. Use `@storyworld/contracts/story-beat`
+// for the schemas and `validateStorySequenceForWorld`.
+export type {
+  StoryAction,
+  StoryBeat,
+  StorySequence,
+  StorySequenceValidation,
+} from "./story-beat";
 export const boundsSchema = z
   .object({
     x: z.number().min(0).max(1000),

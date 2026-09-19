@@ -57,6 +57,16 @@ Dismiss an uncertain preview with **Keep drawing** to revise your words and retr
 
 Provider work proposes a `SceneInterpretationResponse`: image-space object candidates, confidence scores, opening narration, character and goal references, and mood hints. The child confirms or corrects those candidates before the application creates world operations. A confirmed `WorldEvent` is the handoff for visual and audio reactions; it carries a stable event ID, revision, readable summary, and the complete committed world state.
 
+### Story beat contract
+
+Living-story sequences will be described by a strict, presentation-only contract in `@storyworld/contracts/story-beat` (the types are also exported from `@storyworld/contracts`). Only the contract exists so far: no API route, renderer, or fixture generator uses it yet.
+
+- Gemini may propose 1 to 3 **story beats**. Each has an ID, short narration (240 characters at most), a mood, and exactly one action from a fixed set: `focus`, `move_toward`, `blocked_by`, `reveal`, `weather_shift`, or `celebrate`.
+- Beats reference confirmed entities only. `validateStorySequenceForWorld(sequence, world)` rejects any unknown entity ID and any role that does not fit the golden loop: a character moves toward something or is blocked, a river blocks, and a cloud causes weather. It never mutates the sequence or the world.
+- A sequence is tied to a committed revision and event: `requestId`, `sourceRevision`, and `sourceEventId` are attached by the API server, never by the model. A client can discard a sequence whose revision or event is no longer current, that a newer request has replaced, or that mentions an entity that no longer exists.
+- Beats are presentation data and never change the world. They carry no coordinates, durations, easing, CSS, component names, world operations, audio, or video. The renderer decides timing and visuals.
+- Fixture mode will provide deterministic beat sequences. The Gemini endpoint and the renderer are subsequent PRs.
+
 ## Fastest start: Docker
 
 Prerequisite: Docker Desktop with its engine running. No API keys or SpacetimeDB installation are needed for fixture mode.
