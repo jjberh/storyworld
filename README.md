@@ -1,6 +1,6 @@
 # Storyworld
 
-Storyworld begins with a child's own picture. They can start on a blank canvas or upload a drawing, add an optional description, and send the resulting scene draft to the typed scene-interpretation boundary. The draft keeps its normalized source image, strokes, and composite drawing while the picture is read, retried, and extended. The next experience stage will let the child confirm detected objects before creating a shared world.
+Storyworld begins with a child's own picture. They can start on a blank canvas or upload a drawing, add an optional description, and send the resulting scene draft to the typed scene-interpretation boundary. The draft keeps its normalized source image, strokes, and composite drawing while the picture is read, retried, and extended. The child then checks each detected object on the picture before a shared world is created.
 
 The foundation demo is deterministic:
 
@@ -23,13 +23,23 @@ The default route begins with exactly two choices: **Start from scratch** and **
 
 ### Confirming and creating a scene
 
-Review each detected object on the submitted image. Names, supported types, and regions can be corrected; regions can be drawn with a pointer or entered numerically. Remove unwanted detections or mark a region with **Add a missed object**. Check each object explicitly, keep exactly one character, and optionally choose a castle destination and a river the character fears. The opening narration is editable. No fear rule is inferred from the child's free-text prompt. The geometric simulation still treats an unbridged river between the character and destination as an obstacle, independently of fear rules.
+After **Bring my world to life**, the child checks the proposed objects one at a time on their own picture. The current object is highlighted over the image and the card asks, for example, "Is this Fox?" with three answers:
 
-Changing the picture or prompt invalidates the interpretation until it is submitted again. **Create confirmed world** freezes the accepted submission for safe retry and advances only when the committed world is observed. The `initializeScene` reducer validates the complete `ConfirmedScene`, builds typed operations against an empty world, and atomically stores the entities, rules, goal, initial event and `storyDocument` row. Identical owner/request/payload retries return the existing result; conflicting payloads or other owners are rejected.
+- **Yes, that's right!** accepts the object and moves to the next one.
+- **Change it** opens **What should we call it?** and **What kind of thing is it?** so the child can rename or retype the object, and **Draw a new box around it** to redraw its region with the pointer. Bounds are never typed in as numbers.
+- **That is not in my picture** removes the detection.
 
-Fixture interpretation is labelled as sample detections and requires consent; it can only create a local test world. With live interpretation, `mode=fixture` still uses the local world client; `mode=live` uses the configured database. The source picture, strokes, composite, prompt, confirmed objects and opening narration are retained together. Database document rows are public like the foundation's other tables; do not upload confidential pictures. Local fixture documents last for this page session. Maincloud must receive the new module before live scene creation is available.
+**I missed something** lets the child draw a box around anything Gemini overlooked and then name it. Every object must be checked before **Start my story** appears, and exactly one character is required. There is no separate destination picker and the opening narration is not editable here: the destination is Gemini's proposed castle while it remains a confirmed castle, and the narration is Gemini's. Fixture (sample) detections are labelled and need the child's consent (**Use this practice reading**) before they can start a local test story.
 
-This stage ends at a confirmed world. Animation of the child's image and later story consequences are subsequent work.
+No relationship is inferred from a detected river. Seeing a river does not mean the character fears it, so the confirmed scene carries no `afraid_of` rule unless an explicit, validated `fearedRiverId` is supplied (the contract and reducer still accept one). The geometric simulation still treats an unbridged river between the character and the destination as an obstacle, independently of any rule.
+
+Changing the picture or prompt invalidates the interpretation until it is submitted again. **Start my story** freezes the accepted submission, including one world ID and one request ID, and advances only when the committed world is observed. The `initializeScene` reducer validates the complete `ConfirmedScene`, builds typed operations against an empty world, and atomically stores the entities, rules, goal, initial event and `storyDocument` row. Identical owner/request/payload retries return the existing result; conflicting payloads or other owners are rejected.
+
+If creation fails, the picture and the child's answers are kept and two actions appear. **Try starting my story again** is the primary one: it resends the same frozen world ID, request ID and payload, so a lost response or a repeated click cannot create a second world. **Review my picture again** deliberately abandons that attempt and unlocks the picture, the prompt and **Choose another drawing**; the next **Start my story** gets a fresh world ID and request ID.
+
+Fixture interpretation can only create a local test world. With live interpretation, `mode=fixture` still uses the local world client; `mode=live` uses the configured database. The source picture, strokes, composite, prompt, confirmed objects and opening narration are retained together. Database document rows are public like the foundation's other tables; do not upload confidential pictures. Local fixture documents last for this page session. Maincloud must receive the new module before live scene creation is available.
+
+This milestone ends at the committed world. Living-story playback, meaning animation of the child's picture and later story consequences, is subsequent work and does not exist yet.
 
 The former Nova, river, and castle causal demo is retained only as an explicit fixture fallback at `/?mode=fixture&fixture=nova` for fixture demonstrations and automated coverage.
 
@@ -148,7 +158,7 @@ Codes: `PROVIDER_TIMEOUT` (504), `PROVIDER_RATE_LIMITED` (503), `PROVIDER_UNAVAI
       "imageBounds": { "x": 0.71, "y": 0.2, "width": 0.2, "height": 0.35 }
     }
   ],
-  "openingNarration": "One warm sentence about the hero.",
+  "openingNarration": "One warm sentence about the character.",
   "characterCandidateId": "character-…",
   "goalCandidateId": "castle-…",
   "moodHints": ["curious", "worried"]
