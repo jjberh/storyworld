@@ -72,6 +72,23 @@ export function createAudio(
   const timeoutMs = positiveInteger(env.ELEVENLABS_TIMEOUT_MS, 8000);
   const cache = new Map<string, SpokenAudio>();
 
+  // A dropped connection or timeout, whether while sending or while reading.
+  function transportFailure(error: unknown) {
+    if (error instanceof Error && error.name === "TimeoutError")
+      return new ApiError(
+        504,
+        "PROVIDER_TIMEOUT",
+        "The voice helper took too long.",
+        true,
+      );
+    return new ApiError(
+      502,
+      "PROVIDER_UNAVAILABLE",
+      "The voice helper is unavailable.",
+      true,
+    );
+  }
+
   // Turns every transport or upstream failure into a safe, recoverable error.
   async function request(path: string, init: RequestInit) {
     let response: Response;
@@ -82,19 +99,7 @@ export function createAudio(
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
-      if (error instanceof Error && error.name === "TimeoutError")
-        throw new ApiError(
-          504,
-          "PROVIDER_TIMEOUT",
-          "The voice helper took too long.",
-          true,
-        );
-      throw new ApiError(
-        502,
-        "PROVIDER_UNAVAILABLE",
-        "The voice helper is unavailable.",
-        true,
-      );
+      throw transportFailure(error);
     }
     if (response.status === 429)
       throw new ApiError(
@@ -169,7 +174,13 @@ export function createAudio(
           }),
         },
       );
-      const bytes = Buffer.from(await response.arrayBuffer());
+      // The timeout also covers the download, so it can fail after the headers.
+      let bytes: Buffer;
+      try {
+        bytes = Buffer.from(await response.arrayBuffer());
+      } catch (error) {
+        throw transportFailure(error);
+      }
       if (
         !response.headers.get("content-type")?.startsWith("audio/") ||
         bytes.length === 0 ||

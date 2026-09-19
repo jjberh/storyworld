@@ -527,6 +527,37 @@ describe("reaction speech", () => {
     }
   });
 
+  it("classifies a timeout while the audio downloads", async () => {
+    const stalled = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new DOMException("timed out", "TimeoutError"));
+          },
+        }),
+        { headers: { "Content-Type": "audio/mpeg" } },
+      );
+    const app = liveApp(stalled);
+    try {
+      const res = await post(
+        app,
+        "/api/reactions/speech",
+        reactionBody("e", withOpenBridge, start),
+      );
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.reaction).toMatchObject({ emotion: "delighted" });
+      expect(body.audio).toBeNull();
+      expect(body.audioStatus).toBe("failed");
+      expect(body.error).toMatchObject({
+        code: "PROVIDER_TIMEOUT",
+        retryable: true,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   describe("keeps the caption when the voice fails", () => {
     const failures: Array<[string, () => Promise<Response>, string, boolean]> =
       [
