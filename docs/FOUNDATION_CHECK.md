@@ -1,6 +1,6 @@
 # Foundation check
 
-This is the runnable foundation, before the three feature implementations. General project documentation and team instructions follow after onboarding is confirmed.
+This is the runnable foundation before the three feature implementations. Shared team ownership and pull request conventions are documented in `AGENTS.md`.
 
 ## Docker
 
