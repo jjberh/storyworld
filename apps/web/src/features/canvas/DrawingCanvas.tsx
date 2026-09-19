@@ -71,7 +71,11 @@ export function DrawingCanvas({
         if (!drawing) return;
         setDrawing(false);
         const points = strokes.current.at(-1) ?? [];
-        if (points.length < 4) return;
+        if (points.length < 4) {
+          strokes.current = strokes.current.slice(0, -1);
+          setLines(strokes.current);
+          return;
+        }
         const xs = points.filter((_, i) => i % 2 === 0),
           ys = points.filter((_, i) => i % 2 === 1);
         const x = Math.max(0, Math.min(...xs) - 5),
