@@ -49,56 +49,74 @@ try {
       operation,
     }),
   );
+  await director.reducers.applyOperationCommand({
+    worldId,
+    expectedRevision: 0,
+    requestId: "near-miss",
+    operation: JSON.stringify({
+      type: "CREATE_ENTITY",
+      entity: {
+        id: "near-miss-bridge",
+        kind: "bridge",
+        name: "Near miss bridge",
+        bounds: { x: 420, y: 330, width: 119, height: 50 },
+      },
+    }),
+  });
+  await until(() => guest.db.world.id.find(worldId)?.revision === 1);
+  const nearMiss = guest.db.worldEvent.id.find(worldId + ":1")!;
+  assert.equal(JSON.parse(nearMiss.snapshot).pathStatus, "blocked");
+  assert.match(nearMiss.summary, /river still blocks the route/);
   await guest.reducers.submitProposal({
     worldId,
     proposalId: worldId + "-proposal",
     operation,
   });
   await until(() => !!director.db.proposal.id.find(worldId + "-proposal"));
-  assert.equal(director.db.world.id.find(worldId)?.revision, 0);
+  assert.equal(director.db.world.id.find(worldId)?.revision, 1);
   await director.reducers.resolveProposal({
     worldId,
     proposalId: worldId + "-proposal",
     approve: true,
-    expectedRevision: 0,
+    expectedRevision: 1,
     requestId: "accept",
   });
-  await until(() => guest.db.world.id.find(worldId)?.revision === 1);
+  await until(() => guest.db.world.id.find(worldId)?.revision === 2);
   assert.equal(
-    JSON.parse(guest.db.worldEvent.id.find(worldId + ":1")!.snapshot)
+    JSON.parse(guest.db.worldEvent.id.find(worldId + ":2")!.snapshot)
       .pathStatus,
     "available",
   );
   await assert.rejects(() =>
     director.reducers.applyOperationCommand({
       worldId,
-      expectedRevision: 0,
+      expectedRevision: 1,
       requestId: "stale",
       operation: JSON.stringify(cloudOperation()),
     }),
   );
   const args = {
     worldId,
-    expectedRevision: 1,
+    expectedRevision: 2,
     requestId: "cloud-once",
     operation: JSON.stringify(cloudOperation()),
   };
   await director.reducers.applyOperationCommand(args);
   await director.reducers.applyOperationCommand(args);
-  await until(() => guest.db.world.id.find(worldId)?.revision === 2);
+  await until(() => guest.db.world.id.find(worldId)?.revision === 3);
   assert.equal(
-    JSON.parse(guest.db.worldEvent.id.find(worldId + ":2")!.snapshot).weather,
+    JSON.parse(guest.db.worldEvent.id.find(worldId + ":3")!.snapshot).weather,
     "rain",
   );
   await director.reducers.rewindWorld({
     worldId,
     revision: 0,
-    expectedRevision: 2,
+    expectedRevision: 3,
     requestId: "restore",
   });
-  await until(() => guest.db.world.id.find(worldId)?.revision === 3);
+  await until(() => guest.db.world.id.find(worldId)?.revision === 4);
   const restored = JSON.parse(
-    guest.db.worldEvent.id.find(worldId + ":3")!.snapshot,
+    guest.db.worldEvent.id.find(worldId + ":4")!.snapshot,
   );
   assert.equal(restored.pathStatus, "blocked");
   assert.equal(restored.weather, "clear");
