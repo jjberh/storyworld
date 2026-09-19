@@ -23,6 +23,18 @@ import type {
 import { readDrawing } from "../features/canvas/drawing-image";
 import { WorldStage } from "../features/world-renderer/WorldStage";
 import { DrawingCanvas } from "../features/canvas/DrawingCanvas";
+import {
+  createBrowserReactionPlayer,
+  type ReactionAudioState,
+  type ReactionPlayer,
+} from "../features/intelligence/reaction-player";
+import {
+  createTranscriber,
+  isVoiceInputSupported,
+  type Transcriber,
+} from "../features/intelligence/transcriber";
+import { TranscriptionError } from "../features/intelligence/transcription-session";
+import { AudioError } from "../services/audio-client";
 import { interpretEdit } from "../services/intelligence-client";
 import { LiveWorldClient } from "../services/world-client";
 import paintbrushIcon from "../assets/figma/paintbrush.svg";
@@ -76,6 +88,21 @@ export function App() {
   const [transcript, setTranscript] = useState(
     "Nova wants to reach the castle, but she is afraid of water.",
   );
+  // Spoken reaction to the latest confirmed event, and what the voice is doing.
+  const [reaction, setReaction] = useState<{
+    text: string;
+    emotion: string;
+  } | null>(null);
+  const [voice, setVoice] = useState<ReactionAudioState | null>(null);
+  const reactionPlayer = useRef<ReactionPlayer | null>(null);
+  // Speaking the story instead of typing it.
+  const [listening, setListening] = useState<
+    "idle" | "starting" | "listening" | "finishing"
+  >("idle");
+  const [heard, setHeard] = useState("");
+  const [voiceNote, setVoiceNote] = useState("");
+  const transcriber = useRef<Transcriber | null>(null);
+  const canSpeak = useMemo(() => isVoiceInputSupported(), []);
   const container = useRef<HTMLDivElement>(null);
   const pendingFeedback = useRef<{
     revision: number;
@@ -97,11 +124,76 @@ export function App() {
     setPreview(undefined);
     setPhase("ready");
     setNote("Draw across both riverbanks to give Nova a way through.");
+    // A caption about the old world would be misleading after a restore.
+    setReaction(null);
+    setVoice(null);
   }, [version]);
   useEffect(() => {
     void client.connect().catch((e) => setError(String(e)));
     return () => client.dispose();
   }, [client]);
+  useEffect(() => {
+    const player = createBrowserReactionPlayer({
+      onCaption: (cue) => {
+        setReaction({ text: cue.text, emotion: cue.emotion });
+        setVoice(null);
+      },
+      onAudio: (state) => setVoice(state),
+    });
+    reactionPlayer.current = player;
+    return () => {
+      player.dispose();
+      reactionPlayer.current = null;
+    };
+  }, [client]);
+  useEffect(() => {
+    // Only confirmed events drive a reaction. The first call after connecting
+    // just records history, so loading a room never speaks for old events.
+    if (snapshot.status !== "ready" || !snapshot.world) return;
+    void reactionPlayer.current?.observe(snapshot.events);
+  }, [snapshot.status, snapshot.world, snapshot.events]);
+  useEffect(() => () => transcriber.current?.cancel(), []);
+  async function toggleListening() {
+    if (listening === "listening") {
+      setListening("finishing");
+      const heardText = ((await transcriber.current?.stop()) ?? "").trim();
+      transcriber.current = null;
+      setHeard("");
+      setListening("idle");
+      if (heardText) {
+        setTranscript(heardText);
+        setVoiceNote("Here is what we heard. Change it if it isn't right.");
+      } else
+        setVoiceNote("We didn't hear anything. Try again, or type your story.");
+      return;
+    }
+    if (listening !== "idle") return;
+    setVoiceNote("");
+    setListening("starting");
+    const next = createTranscriber({
+      onPartial: (text) => setHeard(text),
+      onError: (failure) => {
+        transcriber.current = null;
+        setHeard("");
+        setListening("idle");
+        setVoiceNote(failure.message);
+      },
+    });
+    transcriber.current = next;
+    try {
+      await next.start();
+      setListening("listening");
+    } catch (failure) {
+      transcriber.current = null;
+      setListening("idle");
+      // Only our own errors carry wording that is safe to show a child.
+      setVoiceNote(
+        failure instanceof AudioError || failure instanceof TranscriptionError
+          ? failure.message
+          : "We could not start listening. You can type instead.",
+      );
+    }
+  }
   useEffect(() => {
     if (!container.current) return;
     const observer = new ResizeObserver(([entry]) =>
@@ -382,6 +474,27 @@ export function App() {
                 rows={2}
                 maxLength={2000}
               />
+              {canSpeak && (
+                <div className="voice-input">
+                  <button
+                    type="button"
+                    className="quiet"
+                    aria-pressed={listening === "listening"}
+                    disabled={
+                      listening === "starting" || listening === "finishing"
+                    }
+                    onClick={() => void toggleListening()}
+                  >
+                    {listening === "listening"
+                      ? "■ Done talking"
+                      : "🎤 Speak your story"}
+                  </button>
+                  {listening === "listening" && (
+                    <span role="status">Listening… {heard}</span>
+                  )}
+                  {voiceNote && <span role="status">{voiceNote}</span>}
+                </div>
+              )}
               <small>
                 Tell us what you drew. You can always follow Nova’s story in
                 words, without sound.
@@ -428,6 +541,20 @@ export function App() {
               >
                 {note}
               </motion.p>
+              {reaction && (
+                <p
+                  className={"reaction reaction-" + reaction.emotion}
+                  aria-live="polite"
+                >
+                  {voice === "playing" && <span aria-hidden="true">🔊 </span>}
+                  {reaction.text}
+                  {(voice === "unavailable" || voice === "failed") && (
+                    <small>
+                      Sound isn’t available right now, so here are the words.
+                    </small>
+                  )}
+                </p>
+              )}
               {phase === "reading" && (
                 <p className="drawing-status" role="status">
                   Looking at your lines and words…
