@@ -22,6 +22,7 @@ The cloud database has not been modified. Live Maincloud requires publishing thi
 
 - Typed world operations, geometric bridge rule, revisions, idempotency, director authorization, guest proposals, event snapshots, reset and restore.
 - React shell, Konva stroke input, Pixi procedural scene, same-origin API proxy, mobile route, fixture/live adapters.
+- Drawing image capture with narration and stroke bounds, uploaded references (PNG/JPEG/WebP), ambiguous-interpretation choices, and retry without losing the drawing. Uploads are reference images for traced edits, not initial-scene generation. Drafts last for the current page only.
 - Fastify `/api/interpret/edit`: live Gemini interpretation when `GEMINI_API_KEY` is set (schema-validated, recoverable errors), deterministic fixture otherwise. `/api/interpret/scene` is still fixture-only; STT/TTS endpoints return explicit 501 until implemented.
 
 Audio, sophisticated animation/pathfinding, QR generation, and finished UX are feature work after this checkpoint. Fixture rooms are local and do not synchronize. Rewind restores semantic state as a new revision; it does not replay historical audio or raw strokes.

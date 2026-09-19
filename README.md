@@ -15,6 +15,14 @@ Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini
 
 ## Shared integration contracts
 
+### Drawing experience
+
+Draw directly on the page or upload a PNG, JPEG, or WebP reference (up to 10 MB), then trace the part to bring to life. Uploads are fitted to a 1000 × 600 drawing surface; they do not replace the semantic world. Each edit sends a compressed image, stroke bounds, and the narration text through the existing interpretation endpoint.
+
+Multiple candidates or confidence below 0.8 prompt a friendly choice before any world change. A failed interpretation preserves the strokes and uploaded reference; **Try my drawing again** reuses the captured image and bounds with your current narration. Drawing references are held in memory for the current page, not saved across reloads. Microphone input, event audio/captions, and full initial-scene generation remain pending provider integration. Text narration works now without audio.
+
+Verify the recovery path by returning a 504 from `/api/interpret/edit`, drawing a bridge, editing the narration, and retrying. The route must remain blocked until an interpretation is accepted and its operation commits. Browser coverage in `tests/drawing-flow.spec.ts` exercises timeout recovery, ambiguous results, uploads, and guest proposals.
+
 Provider work can propose an `InitialSceneResponse`: ordered typed operations, opening narration, Nova's identity, and mood hints. It does not change the world directly. A confirmed `WorldEvent` is the handoff for visual and audio reactions; it carries a stable event ID, revision, readable summary, and the complete committed world state.
 
 ## Fastest start: Docker
