@@ -1,4 +1,5 @@
 import { DbConnection, tables } from "../module_bindings";
+import { SenderError } from "spacetimedb";
 import {
   SCHEMA_VERSION,
   type WorldClient,
@@ -10,6 +11,11 @@ import {
 import { operationSchema } from "@storyworld/contracts";
 export class LiveWorldClient implements WorldClient {
   private connection: DbConnection | null = null;
+  private uri: string | null = null;
+  private database: string | null = null;
+  private identityKey: string | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
   private listeners = new Set<() => void>();
   private disposed = false;
   private snapshot: ClientSnapshot = {
@@ -35,21 +41,39 @@ export class LiveWorldClient implements WorldClient {
     this.snapshot = { ...this.snapshot, status: "error", error: message };
     this.notify();
   }
+  private reconnecting(message: string) {
+    this.snapshot = { ...this.snapshot, status: "connecting", error: message };
+    this.notify();
+  }
   async connect() {
-    const uri = import.meta.env.VITE_SPACETIMEDB_URI ?? "http://127.0.0.1:3000";
-    const database =
+    if (this.uri) return;
+    this.uri = import.meta.env.VITE_SPACETIMEDB_URI ?? "http://127.0.0.1:3000";
+    this.database =
       import.meta.env.VITE_SPACETIMEDB_DATABASE ?? "storyworld-local";
-    const key = "storyworld.identity:" + uri + ":" + database;
+    this.identityKey = "storyworld.identity:" + this.uri + ":" + this.database;
+    this.openConnection();
+  }
+  private openConnection() {
+    if (
+      this.disposed ||
+      this.connection ||
+      !this.uri ||
+      !this.database ||
+      !this.identityKey
+    )
+      return;
     this.connection = DbConnection.builder()
-      .withUri(uri)
-      .withDatabaseName(database)
-      .withToken(localStorage.getItem(key) ?? undefined)
+      .withUri(this.uri)
+      .withDatabaseName(this.database)
+      .withToken(localStorage.getItem(this.identityKey) ?? undefined)
       .onConnect((conn, _identity, token) => {
         if (this.disposed) {
           conn.disconnect();
           return;
         }
-        localStorage.setItem(key, token);
+        this.connection = conn;
+        this.reconnectAttempt = 0;
+        localStorage.setItem(this.identityKey!, token);
         const refresh = () => queueMicrotask(() => this.refresh());
         conn.db.world.onInsert(refresh);
         conn.db.world.onUpdate(refresh);
@@ -74,16 +98,34 @@ export class LiveWorldClient implements WorldClient {
             tables.metadata,
           ]);
       })
-      .onConnectError((_ctx, error) =>
-        this.fail("Database connection failed: " + error.message),
-      )
-      .onDisconnect(() => {
-        if (!this.disposed) this.fail("Disconnected. Reload to reconnect.");
+      .onConnectError((conn) => {
+        if (!this.disposed && conn === this.connection) {
+          this.connection = null;
+          this.reconnecting("Database connection failed. Retrying…");
+          this.scheduleReconnect();
+        }
+      })
+      .onDisconnect((conn) => {
+        if (!this.disposed && conn === this.connection) {
+          this.connection = null;
+          this.reconnecting("Connection interrupted. Reconnecting…");
+          this.scheduleReconnect();
+        }
       })
       .build();
   }
+  private scheduleReconnect() {
+    if (this.reconnectTimer || this.disposed) return;
+    const delay = Math.min(1_000 * 2 ** this.reconnectAttempt, 10_000);
+    this.reconnectAttempt += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.openConnection();
+    }, delay);
+  }
   private refresh() {
-    if (this.disposed || !this.connection) return;
+    if (this.disposed) return;
+    if (!this.connection) return;
     const conn = this.connection;
     const meta = conn.db.metadata.id.find("schema");
     if (!meta || meta.schemaVersion !== SCHEMA_VERSION) {
@@ -139,44 +181,111 @@ export class LiveWorldClient implements WorldClient {
       requestId: crypto.randomUUID(),
     };
   }
+  private waitForReady() {
+    if (this.snapshot.status === "ready") return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        unsubscribe();
+        reject(new Error("Database did not reconnect in time."));
+      }, 10_000);
+      const unsubscribe = this.subscribe(() => {
+        if (this.snapshot.status === "ready") {
+          clearTimeout(timeout);
+          unsubscribe();
+          resolve();
+        }
+        if (this.snapshot.status === "error") {
+          clearTimeout(timeout);
+          unsubscribe();
+          reject(
+            new Error(this.snapshot.error ?? "Database connection failed."),
+          );
+        }
+      });
+    });
+  }
+  private awaitReducerWhileConnected(reducer: Promise<void>) {
+    return new Promise<void>((resolve, reject) => {
+      const unsubscribe = this.subscribe(() => {
+        if (this.snapshot.status !== "ready") {
+          unsubscribe();
+          reject(new Error("Database connection interrupted."));
+        }
+      });
+      reducer.then(
+        () => {
+          unsubscribe();
+          resolve();
+        },
+        (error) => {
+          unsubscribe();
+          reject(error);
+        },
+      );
+    });
+  }
+  private async retryReducer(call: (conn: DbConnection) => Promise<void>) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.awaitReducerWhileConnected(call(this.conn()));
+        return;
+      } catch (error) {
+        if (error instanceof SenderError || attempt === 1) throw error;
+        await this.waitForReady();
+      }
+    }
+  }
   async createWorld(id: string) {
     if (id !== this.room) throw new Error("Open the desired room URL first.");
     await this.conn().reducers.createWorld({ worldId: id });
   }
   async joinWorld(id: string) {
-    await this.conn().reducers.joinWorld({ worldId: id });
+    await this.retryReducer((conn) => conn.reducers.joinWorld({ worldId: id }));
   }
   async apply(operation: WorldOperation) {
-    await this.conn().reducers.applyOperationCommand({
+    const args = {
       ...this.args(),
       operation: JSON.stringify(operationSchema.parse(operation)),
-    });
+    };
+    await this.retryReducer((conn) =>
+      conn.reducers.applyOperationCommand(args),
+    );
   }
   async propose(operation: WorldOperation) {
-    const conn = this.conn();
-    await conn.reducers.joinWorld({ worldId: this.room });
-    await conn.reducers.submitProposal({
+    await this.retryReducer((conn) =>
+      conn.reducers.joinWorld({ worldId: this.room }),
+    );
+    const args = {
       worldId: this.room,
       proposalId: crypto.randomUUID(),
-      operation: JSON.stringify(operation),
-    });
+      operation: JSON.stringify(operationSchema.parse(operation)),
+    };
+    await this.retryReducer((conn) => conn.reducers.submitProposal(args));
   }
   async resolveProposal(proposalId: string, approve: boolean) {
-    await this.conn().reducers.resolveProposal({
+    const args = {
       ...this.args(),
       proposalId,
       approve,
-    });
+    };
+    await this.retryReducer((conn) => conn.reducers.resolveProposal(args));
   }
   async reset() {
-    await this.conn().reducers.resetDemoWorld(this.args());
+    const args = this.args();
+    await this.retryReducer((conn) => conn.reducers.resetDemoWorld(args));
   }
   async rewind(revision: number) {
-    await this.conn().reducers.rewindWorld({ ...this.args(), revision });
+    const args = { ...this.args(), revision };
+    await this.retryReducer((conn) => conn.reducers.rewindWorld(args));
   }
   dispose() {
     this.disposed = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.connection?.disconnect();
+    this.connection = null;
+    this.uri = null;
+    this.database = null;
+    this.identityKey = null;
     this.listeners.clear();
   }
 }

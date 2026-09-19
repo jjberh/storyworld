@@ -87,6 +87,31 @@ try {
       .pathStatus,
     "available",
   );
+  await guest.reducers.submitProposal({
+    worldId,
+    proposalId: worldId + "-rejected-cloud",
+    operation: JSON.stringify(cloudOperation()),
+  });
+  await until(
+    () => !!director.db.proposal.id.find(worldId + "-rejected-cloud"),
+  );
+  await director.reducers.resolveProposal({
+    worldId,
+    proposalId: worldId + "-rejected-cloud",
+    approve: false,
+    expectedRevision: 2,
+    requestId: "reject",
+  });
+  await until(
+    () =>
+      guest.db.proposal.id.find(worldId + "-rejected-cloud")?.status ===
+      "rejected",
+  );
+  assert.equal(guest.db.world.id.find(worldId)?.revision, 2);
+  assert.equal(
+    JSON.parse(guest.db.worldEvent.id.find(worldId + ":2")!.snapshot).weather,
+    "clear",
+  );
   await assert.rejects(() =>
     director.reducers.applyOperationCommand({
       worldId,
@@ -121,7 +146,7 @@ try {
   assert.equal(restored.pathStatus, "blocked");
   assert.equal(restored.weather, "clear");
   console.log(
-    "PASS: independent clients synchronize; unauthorized/stale edits rejected; proposals, idempotency, and rewind verified.",
+    "PASS: independent clients synchronize; unauthorized/stale edits rejected; proposal approval/rejection, idempotency, and rewind verified.",
   );
 } finally {
   director.disconnect();
