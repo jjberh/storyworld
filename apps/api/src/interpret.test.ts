@@ -327,20 +327,4 @@ describe("keyless fixture mode", () => {
       await app.close();
     }
   });
-
-  it("keeps the scene route on the fixture until its contract is agreed", async () => {
-    const fetchMock = vi.fn();
-    const app = liveApp(fetchMock as unknown as typeof fetch);
-    try {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/interpret/scene",
-        payload: { entityKind: "bridge" },
-      });
-      expect(res.json().mode).toBe("fixture");
-      expect(fetchMock).not.toHaveBeenCalled();
-    } finally {
-      await app.close();
-    }
-  });
 });

@@ -11,7 +11,7 @@ Add a storm cloud -> the world becomes rainy.
 Reset or rewind -> the semantic world returns to an earlier revision.
 ```
 
-Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` and the ElevenLabs routes still return a fixture response or `501` until those integrations are implemented.
+Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` does the same for an uploaded picture. The ElevenLabs routes still return `501` until those integrations are implemented.
 
 ## Shared integration contracts
 
@@ -77,7 +77,7 @@ GEMINI_API_KEY=
 ELEVENLABS_API_KEY=
 ```
 
-Optional server settings: `GEMINI_MODEL` (default `gemini-3.6-flash`) and `GEMINI_TIMEOUT_MS` (default `8000`, kept below the browser's 10 second abort).
+Optional server settings: `GEMINI_MODEL` (default `gemini-3.6-flash`), `GEMINI_TIMEOUT_MS` (default `8000`, kept below the browser's 10 second abort), and `GEMINI_SCENE_TIMEOUT_MS` (default `20000`; a whole scene takes about 7-9 seconds).
 
 Never prefix provider secrets with `VITE_`, commit `.env`, or paste keys into an issue, chat, screenshot, or pull request.
 
@@ -92,6 +92,44 @@ If Gemini fails, the route does not fall back to the fixture. It returns a recov
 ```
 
 Codes: `PROVIDER_TIMEOUT` (504), `PROVIDER_RATE_LIMITED` (503), `PROVIDER_UNAVAILABLE`, `PROVIDER_FAILED`, `PROVIDER_AUTH_FAILED`, `INVALID_MODEL_OUTPUT` (502), and `INVALID_INPUT` (400). Remove the key to run the fixture flow.
+
+### Scene interpretation
+
+`POST /api/interpret/scene` turns an uploaded picture plus optional narration into a proposed opening scene. Send `{ "image": "data:image/png;base64,…", "transcript": "optional narration" }`; PNG, JPEG, and WebP data URLs are accepted. It returns a proposal only and never writes to SpacetimeDB:
+
+```json
+{
+  "mode": "live",
+  "message": "A friendly sentence for the child.",
+  "scene": {
+    "operations": [
+      {
+        "type": "CREATE_ENTITY",
+        "entity": {
+          "id": "character-…",
+          "kind": "character",
+          "name": "Sunny",
+          "bounds": { "x": 105, "y": 275, "width": 170, "height": 155 }
+        }
+      },
+      "…",
+      {
+        "type": "SET_GOAL",
+        "characterId": "character-…",
+        "targetId": "castle-…"
+      }
+    ],
+    "openingNarration": "One warm sentence about the hero.",
+    "character": { "id": "character-…", "name": "Sunny" },
+    "moodHints": ["curious", "worried"]
+  },
+  "confidences": [{ "entityId": "character-…", "confidence": 0.95 }]
+}
+```
+
+`scene` is the shared `InitialSceneResponse`; `confidences` carries the per-object scores it has no field for. Gemini identifies only `character`, `castle`, `river`, `bridge`, `cloud`, and `shelter`, each with a box in its native format (0-1000 across the whole picture on both axes). The server stretches that into the 1000×600 world, mints the IDs, keeps at most one character, castle, and river, keeps every box inside the world, requires a character, and adds a `SET_GOAL` from the character to the castle when both exist. Without a key the route returns the fixed Nova, river, and castle scene with `"mode": "fixture"` and ignores the image.
+
+In addition to the codes above, scene requests can return `IMAGE_REQUIRED` and `UNSUPPORTED_IMAGE` (400, not retryable: pick another picture) and `SCENE_NOT_RECOGNIZED` (422, retryable: no hero was found). The picture's bytes must match its declared type, so a mislabelled file is rejected before any model call.
 
 ## Josh: local and Maincloud database work
 

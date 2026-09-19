@@ -2,19 +2,13 @@ import Fastify from "fastify";
 import { z } from "zod";
 import { registerInterpretRoutes } from "./routes/interpret";
 import { ApiError } from "./services/errors";
-import {
-  fixtureInterpretation,
-  type Interpreter,
-} from "./services/interpretation";
+import { createInterpreter, type Interpreter } from "./services/interpretation";
 
 export type AppOptions = { interpreter?: Interpreter };
 
 export function buildApp(options: AppOptions = {}) {
   // Defaults to the keyless fixture; server.ts injects the env-configured one.
-  const interpreter: Interpreter = options.interpreter ?? {
-    mode: "fixture",
-    interpret: async (input) => fixtureInterpretation(input),
-  };
+  const interpreter = options.interpreter ?? createInterpreter({});
   const app = Fastify({ bodyLimit: 5_000_000, logger: false });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ApiError)
