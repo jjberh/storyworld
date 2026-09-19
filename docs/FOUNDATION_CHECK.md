@@ -1,7 +1,9 @@
 # Foundation check
 
-This foundation now includes the child-led initial-authoring handoff. Shared
+This foundation includes child-led initial authoring, in-place object
+confirmation, and atomic creation of a world from a confirmed scene. Shared
 team ownership and pull request conventions are documented in `AGENTS.md`.
+Living-story animation of the confirmed picture is the next milestone.
 
 ## Docker
 
@@ -26,7 +28,8 @@ Run `npm run db:start` in one terminal. In another run
 `npm run db:publish:local` and `npm run db:generate`. Configure
 VITE_SPACETIMEDB_URI=http://127.0.0.1:3000 and
 VITE_SPACETIMEDB_DATABASE=storyworld-local, then restart web. The normal live
-route remains on initial authoring. For the retained collaboration test, open
+authoring flow can create a confirmed world after the updated module is
+published locally. For the retained collaboration test, open
 `/?mode=live&world=your-room&fixture=nova`; a second browser profile uses
 `/join?mode=live&world=your-room&fixture=nova`.
 
@@ -40,6 +43,11 @@ The cloud database has not been modified. Live Maincloud requires publishing thi
   preserves the source artwork beneath later strokes, and submits the composite
   image and optional description to `/api/interpret/scene`. Drafts survive
   interpretation failures and retry, but remain in memory for the page session.
+- The child can accept, change, remove, or add detected objects on the submitted
+  picture. Changing the picture or prompt requires reinterpretation.
+  `initializeScene` atomically creates the confirmed world and retains its
+  `StoryDocument`; local fixture worlds last for the page session, while live
+  confirmed scenes are stored in the database.
 - The explicit Nova fixture retains drawing capture, uploaded references,
   ambiguous-interpretation choices, and retry without losing the drawing.
 - Fastify `/api/interpret/edit`: live Gemini interpretation when `GEMINI_API_KEY` is set (schema-validated, recoverable errors), deterministic fixture otherwise. `/api/interpret/scene` turns an uploaded picture into a proposed initial scene; STT/TTS endpoints return explicit 501 until implemented.

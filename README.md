@@ -19,7 +19,17 @@ Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini
 
 The default route begins with exactly two choices: **Start from scratch** and **Upload a drawing**. Both create the same `StoryDocument` shape: a source image, structured drawing data (strokes plus composite image), and an optional description. A scratch document uses a real blank source layer; an upload is resized onto that same 1000 × 600 layer. New strokes always sit above the source layer, so future drawing layers can be added without replacing the child's image.
 
-**Bring my world to life** sends the draft composite image and optional child description to `POST /api/interpret/scene`. The browser preserves that draft during interpretation and recoverable failures, and **Try bringing it to life again** resubmits the same scene. It does not show object-confirmation controls or create world operations yet.
+**Bring my world to life** sends the draft composite image and optional child description to `POST /api/interpret/scene`. The browser preserves that draft during interpretation and recoverable failures, and **Try bringing it to life again** resubmits the same scene.
+
+### Confirming and creating a scene
+
+Review each detected object on the submitted image. Names, supported types, and regions can be corrected; regions can be drawn with a pointer or entered numerically. Remove unwanted detections or mark a region with **Add a missed object**. Check each object explicitly, keep exactly one character, and optionally choose a castle destination and a river the character fears. The opening narration is editable. No fear rule is inferred from the child's free-text prompt. The geometric simulation still treats an unbridged river between the character and destination as an obstacle, independently of fear rules.
+
+Changing the picture or prompt invalidates the interpretation until it is submitted again. **Create confirmed world** freezes the accepted submission for safe retry and advances only when the committed world is observed. The `initializeScene` reducer validates the complete `ConfirmedScene`, builds typed operations against an empty world, and atomically stores the entities, rules, goal, initial event and `storyDocument` row. Identical owner/request/payload retries return the existing result; conflicting payloads or other owners are rejected.
+
+Fixture interpretation is labelled as sample detections and requires consent; it can only create a local test world. With live interpretation, `mode=fixture` still uses the local world client; `mode=live` uses the configured database. The source picture, strokes, composite, prompt, confirmed objects and opening narration are retained together. Database document rows are public like the foundation's other tables; do not upload confidential pictures. Local fixture documents last for this page session. Maincloud must receive the new module before live scene creation is available.
+
+This stage ends at a confirmed world. Animation of the child's image and later story consequences are subsequent work.
 
 The former Nova, river, and castle causal demo is retained only as an explicit fixture fallback at `/?mode=fixture&fixture=nova` for fixture demonstrations and automated coverage.
 

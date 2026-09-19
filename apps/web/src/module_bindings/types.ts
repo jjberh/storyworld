@@ -46,6 +46,13 @@ export const Proposal = __t.object("Proposal", {
 });
 export type Proposal = __Infer<typeof Proposal>;
 
+export const StoryDocument = __t.object("StoryDocument", {
+  worldId: __t.string(),
+  requestId: __t.string(),
+  scene: __t.string(),
+});
+export type StoryDocument = __Infer<typeof StoryDocument>;
+
 export const World = __t.object("World", {
   id: __t.string(),
   owner: __t.identity(),

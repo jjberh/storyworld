@@ -8,7 +8,11 @@ import {
   type WorldState,
   type Proposal,
 } from "@storyworld/contracts/model";
-import { operationSchema } from "@storyworld/contracts";
+import {
+  operationSchema,
+  confirmedSceneSchema,
+  type ConfirmedScene,
+} from "@storyworld/contracts";
 export class LiveWorldClient implements WorldClient {
   private connection: DbConnection | null = null;
   private uri: string | null = null;
@@ -77,6 +81,7 @@ export class LiveWorldClient implements WorldClient {
         const refresh = () => queueMicrotask(() => this.refresh());
         conn.db.world.onInsert(refresh);
         conn.db.world.onUpdate(refresh);
+        conn.db.storyDocument.onInsert(refresh);
         conn.db.worldEvent.onInsert(refresh);
         conn.db.proposal.onInsert(refresh);
         conn.db.proposal.onUpdate(refresh);
@@ -96,6 +101,7 @@ export class LiveWorldClient implements WorldClient {
             tables.worldEvent.where((e) => e.worldId.eq(this.room)),
             tables.proposal.where((p) => p.worldId.eq(this.room)),
             tables.metadata,
+            tables.storyDocument.where((s) => s.worldId.eq(this.room)),
           ]);
       })
       .onConnectError((conn) => {
@@ -164,6 +170,11 @@ export class LiveWorldClient implements WorldClient {
       events,
       proposals,
       isDirector: !!row && !!conn.identity && row.owner.isEqual(conn.identity),
+      scene: conn.db.storyDocument.worldId.find(this.room)
+        ? confirmedSceneSchema.parse(
+            JSON.parse(conn.db.storyDocument.worldId.find(this.room)!.scene),
+          )
+        : undefined,
     };
     this.notify();
   }
@@ -238,6 +249,33 @@ export class LiveWorldClient implements WorldClient {
   async createWorld(id: string) {
     if (id !== this.room) throw new Error("Open the desired room URL first.");
     await this.conn().reducers.createWorld({ worldId: id });
+  }
+  async initializeScene(id: string, requestId: string, scene: ConfirmedScene) {
+    if (id !== this.room) throw new Error("Open the desired room first.");
+    await this.waitForReady();
+    const args = {
+      worldId: id,
+      requestId,
+      scene: JSON.stringify(confirmedSceneSchema.parse(scene)),
+    };
+    await this.retryReducer((conn) => conn.reducers.initializeScene(args));
+    // Completion means the committed event and document have reached this client.
+    if (this.snapshot.world?.id === id && this.snapshot.scene) return;
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        unsubscribe();
+        reject(
+          new Error("Waiting for the committed world timed out. Retry safely."),
+        );
+      }, 10000);
+      const unsubscribe = this.subscribe(() => {
+        if (this.snapshot.world?.id === id && this.snapshot.scene) {
+          clearTimeout(timeout);
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
   }
   async joinWorld(id: string) {
     await this.retryReducer((conn) => conn.reducers.joinWorld({ worldId: id }));

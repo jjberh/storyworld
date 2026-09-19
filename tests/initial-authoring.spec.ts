@@ -72,7 +72,9 @@ test("a source image and later strokes stay in the scene draft when retrying", a
   await page
     .getByRole("button", { name: "Try bringing it to life again" })
     .click();
-  await expect(page.getByText(/We found the beginnings/)).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Check your picture" }),
+  ).toBeVisible();
   expect(inputs).toHaveLength(2);
   expect(inputs[0]).toEqual(inputs[1]);
 });
@@ -91,19 +93,31 @@ test("an uploaded source stays beneath later drawing changes", async ({
     .setInputFiles("apps/web/src/assets/figma/castle.png");
   await expect(page.locator(".drawing-layer canvas").last()).toBeVisible();
   await page.getByRole("button", { name: "Bring my world to life" }).click();
-  await expect(page.getByText(/We found the beginnings/)).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Check your picture" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Choose another drawing" })
+    .first()
+    .click();
+  await page
+    .getByLabel("Choose a drawing file")
+    .setInputFiles("apps/web/src/assets/figma/castle.png");
 
   const canvas = page.locator(".drawing-layer canvas").last();
+  await expect(canvas).toBeVisible();
   const box = (await canvas.boundingBox())!;
   await page.mouse.move(box.x + 100, box.y + 100);
   await page.mouse.down();
   await page.mouse.move(box.x + 180, box.y + 140, { steps: 4 });
   await page.mouse.up();
-  await expect(page.getByText(/We found the beginnings/)).toHaveCount(0);
   await page
     .getByLabel("What happens in your story?")
     .fill("The character explores");
   await page.getByRole("button", { name: "Bring my world to life" }).click();
+  await expect(
+    page.getByRole("region", { name: "Check your picture" }),
+  ).toBeVisible();
 
   expect(inputs).toHaveLength(2);
   expect(inputs[0]!.image).not.toEqual(inputs[1]!.image);
