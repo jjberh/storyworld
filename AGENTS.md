@@ -50,6 +50,11 @@ npm run test:e2e
 - Keep `.env.example`, package scripts, Docker instructions, generated bindings, tests, and docs consistent with one another. If a change affects one of these surfaces, check the related surfaces before opening the PR.
 - Treat the public README and root `AGENTS.md` as committed project documentation. The private `docs/plans/` handoff notes remain ignored and must not be linked from public docs.
 
+## UI work
+
+- Always use the `frontend-design` skill before creating, modifying, or reviewing user-facing UI, including React components, styles, layouts, visual states, interaction design, and responsive behavior.
+- Follow the skill's design-plan and self-critique process before implementation. Preserve the established Storyworld art direction unless the task explicitly changes it.
+
 ## Ownership and branches
 
 After the foundation checkpoint, use one branch per area:
