@@ -98,6 +98,8 @@ $env:VITE_SPACETIMEDB_DATABASE="storyworld-local"
 npm run dev -w @storyworld/web
 ```
 
+Use separate browser profiles for the director and guest. After accepting a change, refresh both profiles and use the timeline to rewind; both clients should converge on the same state. The live client reconnects after a short connection interruption and resends an interrupted reducer call once with its original request ID.
+
 To publish the tested module to the shared Maincloud database, first confirm that the module matches the intended empty database and do not use `--delete-data`:
 
 ```powershell

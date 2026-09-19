@@ -25,6 +25,20 @@ test("live director and guest synchronize an approved bridge", async ({
     await expect(
       b.getByText("Route opened", { exact: false }).first(),
     ).toBeVisible();
+    await a.reload();
+    await b.reload();
+    await expect(
+      a.getByText("Route opened", { exact: false }).first(),
+    ).toBeVisible();
+    await expect(
+      b.getByText("Route opened", { exact: false }).first(),
+    ).toBeVisible();
+    await a
+      .getByRole("button", { name: /The adventure begins/ })
+      .first()
+      .click();
+    await expect(a.getByText("River blocks the route")).toBeVisible();
+    await expect(b.getByText("River blocks the route")).toBeVisible();
   } finally {
     await director.close();
     await guest.close();
