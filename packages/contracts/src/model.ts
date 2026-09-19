@@ -1,5 +1,11 @@
 export const SCHEMA_VERSION = 1;
 export type Bounds = { x: number; y: number; width: number; height: number };
+export type ImageBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 export type EntityKind =
   "character" | "castle" | "river" | "bridge" | "cloud" | "shelter";
 export type Entity = {
@@ -14,6 +20,22 @@ export type InitialSceneResponse = {
   operations: WorldOperation[];
   openingNarration: string;
   character: CharacterIdentity;
+  moodHints: StoryMood[];
+};
+export type SceneCandidate = {
+  id: string;
+  kind: EntityKind;
+  name: string;
+  confidence: number;
+  imageBounds: ImageBounds;
+};
+export type SceneInterpretationResponse = {
+  mode: "fixture" | "live";
+  message: string;
+  candidates: SceneCandidate[];
+  openingNarration: string;
+  characterCandidateId: string;
+  goalCandidateId?: string;
   moodHints: StoryMood[];
 };
 export type WorldRule = {
