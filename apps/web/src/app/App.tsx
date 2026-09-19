@@ -25,6 +25,12 @@ import { WorldStage } from "../features/world-renderer/WorldStage";
 import { DrawingCanvas } from "../features/canvas/DrawingCanvas";
 import { interpretEdit } from "../services/intelligence-client";
 import { LiveWorldClient } from "../services/world-client";
+import paintbrushIcon from "../assets/figma/paintbrush.svg";
+import circleXIcon from "../assets/figma/circle-x.svg";
+import cloudIcon from "../assets/figma/cloud.svg";
+import castleImage from "../assets/figma/castle.png";
+import sunIcon from "../assets/figma/sun.svg";
+import scribblesImage from "../assets/figma/scribbles.svg";
 
 function drawingVersion(snapshot: ClientSnapshot) {
   return (
@@ -227,12 +233,16 @@ export function App() {
     <main className="shell">
       <header>
         <a className="brand" href="/">
-          ✳ Storyworld<span>A LITTLE DRAWING. A WHOLE WORLD.</span>
+          <span className="brand-mark">
+            <img src={paintbrushIcon} alt="" />
+          </span>
+          <span className="brand-name">Storyworld</span>
+          <span>A little drawing. A whole world.</span>
         </a>
         <div className="status">
-          <i />
-          {mode === "live" ? "Live database" : "Local fixture"}
-          <span>Foundation preview</span>
+          <span className="live-badge">
+            {mode === "live" ? "LIVE WORLD" : "FIXTURE MODE"}
+          </span>
         </div>
       </header>
       <section className="intro">
@@ -244,42 +254,9 @@ export function App() {
             <em>a possibility.</em>
           </h1>
           <p>
-            Help Nova reach the castle. Draw a bridge, change the sky,
-            <br className="desktop" /> and watch your little world respond.
+            Help Nova reach the castle. Draw a bridge, change the sky, and watch
+            your little world respond.
           </p>
-        </div>
-        <div className="room-card">
-          <span>YOUR STORY ROOM</span>
-          <strong>{world?.id ?? room}</strong>
-          <small>
-            {contributor
-              ? requestedGuest
-                ? "Guest contribution view"
-                : "This room belongs to another director. Propose a change instead."
-              : snapshot.isDirector
-                ? "You are the director"
-                : "Join or create a world"}
-          </small>
-          <button
-            onClick={() =>
-              void run(async () => {
-                await navigator.clipboard.writeText(
-                  location.origin +
-                    "/join?mode=" +
-                    mode +
-                    "&world=" +
-                    (world?.id ?? room),
-                );
-                setNote(
-                  mode === "fixture"
-                    ? "Link copied. Use live mode for shared worlds."
-                    : "Guest link copied.",
-                );
-              })
-            }
-          >
-            Copy guest link ↗
-          </button>
         </div>
       </section>
       {(error || snapshot.error) && (
@@ -356,29 +333,35 @@ export function App() {
             <div className="canvas-tools">
               <div>
                 <button
+                  className="tool-chip"
                   aria-pressed={kind === "bridge"}
                   onClick={() => setKind("bridge")}
                 >
-                  〰 Bridge
+                  <img src={circleXIcon} alt="" /> Bridge
                 </button>
                 <button
+                  className="tool-chip"
                   aria-pressed={kind === "cloud"}
                   onClick={() => setKind("cloud")}
                 >
-                  ☁ Cloud
+                  <img src={cloudIcon} alt="" /> Cloud
                 </button>
               </div>
-              <span>
+              <span className="world-status">
                 {world.pathStatus === "available"
-                  ? "✦ Route opened"
+                  ? "Route opened"
                   : world.pathStatus === "blocked"
                     ? "River blocks the route"
-                    : "No goal"}{" "}
-                · r{world.revision}
+                    : "No route yet"}
               </span>
             </div>
             <div className="paper" ref={container}>
               <WorldStage world={world} latestEvent={snapshot.events.at(-1)} />
+              <div className="canvas-art" aria-hidden="true">
+                <img className="scribble-art" src={scribblesImage} alt="" />
+                <img className="sun-art" src={sunIcon} alt="" />
+                <img className="castle-art" src={castleImage} alt="" />
+              </div>
               <div className="drawing-layer">
                 <DrawingCanvas
                   key={version}
@@ -391,7 +374,7 @@ export function App() {
               <span className="paper-caption">YOUR IMAGINATION GOES HERE</span>
             </div>
             <div className="narration">
-              <label htmlFor="narration">The story so far</label>
+              <label htmlFor="narration">The Story So Far</label>
               <textarea
                 id="narration"
                 value={transcript}
@@ -406,135 +389,176 @@ export function App() {
             </div>
           </div>
           <aside>
-            <p className="eyebrow">THE WORLD LISTENS</p>
-            <h2>
-              A small change.
-              <br />A new adventure.
-            </h2>
-            <motion.p
-              key={note}
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="note"
-              aria-live="polite"
-            >
-              {note}
-            </motion.p>
-            {phase === "reading" && (
-              <p className="drawing-status" role="status">
-                Looking at your lines and words…
-              </p>
-            )}
-            {phase === "confirming" && (
-              <p className="drawing-status" role="status">
-                Your idea is on its way…
-              </p>
-            )}
-            {preview && (
-              <div
-                className="interpretation-preview"
-                role="group"
-                aria-label="Choose what your drawing becomes"
-              >
-                {preview.candidates.map((candidate, index) => (
-                  <button
-                    key={index}
-                    disabled={busy}
-                    onClick={() => void commitCandidate(preview, index)}
-                  >
-                    {candidate.operation.type === "CREATE_ENTITY"
-                      ? `Make it a ${candidate.operation.entity.name}`
-                      : "Use this idea"}
-                  </button>
-                ))}
-                <button
-                  className="quiet"
-                  onClick={() => {
-                    setPreview(undefined);
-                    setPhase("retry");
-                    setNote(
-                      "Keep drawing, or change your words and try again.",
+            <div className="room-card">
+              <h2>Your Story Room</h2>
+              <strong>Code: {world.id}</strong>
+              <button
+                className="primary-action"
+                onClick={() =>
+                  void run(async () => {
+                    await navigator.clipboard.writeText(
+                      location.origin +
+                        "/join?mode=" +
+                        mode +
+                        "&world=" +
+                        world.id,
                     );
-                  }}
+                    setNote(
+                      mode === "fixture"
+                        ? "Link copied. Use live mode for shared worlds."
+                        : "Guest link copied.",
+                    );
+                  })
+                }
+              >
+                Copy guest link
+              </button>
+            </div>
+            <div className="proposals-card">
+              <h2>The World Listens</h2>
+              <p className="card-help">
+                Click to propose live doodles to the director
+              </p>
+              <motion.p
+                key={note}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="note"
+                aria-live="polite"
+              >
+                {note}
+              </motion.p>
+              {phase === "reading" && (
+                <p className="drawing-status" role="status">
+                  Looking at your lines and words…
+                </p>
+              )}
+              {phase === "confirming" && (
+                <p className="drawing-status" role="status">
+                  Your idea is on its way…
+                </p>
+              )}
+              {preview && (
+                <div
+                  className="interpretation-preview"
+                  role="group"
+                  aria-label="Choose what your drawing becomes"
                 >
-                  Keep drawing
-                </button>
-              </div>
-            )}
-            {phase === "retry" && lastDrawing && (
-              <button
-                className="retry-drawing"
-                onClick={() =>
-                  void interpretDrawing({ ...lastDrawing, transcript })
-                }
-              >
-                Try my drawing again
-              </button>
-            )}
-            <div className="actions">
-              <button
-                disabled={drawingBusy}
-                onClick={() =>
-                  void run(() =>
-                    contributor
-                      ? client.propose(bridgeOperation())
-                      : client.apply(bridgeOperation()),
-                  )
-                }
-              >
-                {contributor ? "Propose" : "Add"} sample bridge
-              </button>
-              <button
-                disabled={drawingBusy}
-                onClick={() =>
-                  void run(() =>
-                    contributor
-                      ? client.propose(cloudOperation())
-                      : client.apply(cloudOperation()),
-                  )
-                }
-              >
-                {contributor ? "Propose" : "Add"} storm cloud
-              </button>
-              {snapshot.isDirector && !requestedGuest && (
-                <button
-                  className="quiet"
-                  disabled={drawingBusy}
-                  onClick={() =>
-                    void run(async () => {
-                      await client.reset();
-                      setReference(undefined);
-                      setLastDrawing(undefined);
-                      setPhase("ready");
+                  {preview.candidates.map((candidate, index) => (
+                    <button
+                      key={index}
+                      disabled={busy}
+                      onClick={() => void commitCandidate(preview, index)}
+                    >
+                      {candidate.operation.type === "CREATE_ENTITY"
+                        ? `Make it a ${candidate.operation.entity.name}`
+                        : "Use this idea"}
+                    </button>
+                  ))}
+                  <button
+                    className="quiet"
+                    onClick={() => {
+                      setPreview(undefined);
+                      setPhase("retry");
                       setNote(
-                        "Draw across both riverbanks to give Nova a way through.",
+                        "Keep drawing, or change your words and try again.",
                       );
-                    })
+                    }}
+                  >
+                    Keep drawing
+                  </button>
+                </div>
+              )}
+              {phase === "retry" && lastDrawing && (
+                <button
+                  className="retry-drawing"
+                  onClick={() =>
+                    void interpretDrawing({ ...lastDrawing, transcript })
                   }
                 >
-                  Reset world
+                  Try my drawing again
                 </button>
               )}
+              <div className="actions">
+                <button
+                  className="primary-action"
+                  disabled={drawingBusy}
+                  onClick={() =>
+                    void run(() =>
+                      contributor
+                        ? client.propose(bridgeOperation())
+                        : client.apply(bridgeOperation()),
+                    )
+                  }
+                >
+                  {contributor ? "Propose" : "Add"} sample bridge
+                </button>
+                <button
+                  className="secondary-action"
+                  disabled={drawingBusy}
+                  onClick={() =>
+                    void run(() =>
+                      contributor
+                        ? client.propose(cloudOperation())
+                        : client.apply(cloudOperation()),
+                    )
+                  }
+                >
+                  {contributor ? "Propose" : "Add"} storm cloud
+                </button>
+                {snapshot.isDirector && !requestedGuest && (
+                  <button
+                    className="quiet"
+                    disabled={drawingBusy}
+                    onClick={() =>
+                      void run(async () => {
+                        await client.reset();
+                        setReference(undefined);
+                        setLastDrawing(undefined);
+                        setPhase("ready");
+                        setNote(
+                          "Draw across both riverbanks to give Nova a way through.",
+                        );
+                      })
+                    }
+                  >
+                    Reset world
+                  </button>
+                )}
+              </div>
             </div>
             <div className="divider" />
-            <p className="eyebrow">STORY MOMENTS</p>
-            <button
-              className="timeline-item"
-              disabled={drawingBusy || !snapshot.isDirector || requestedGuest}
-              onClick={() => void run(() => client.rewind(0))}
-            >
-              00 · The adventure begins
-            </button>
-            {snapshot.events.slice(-6).map((e) => (
+            <div className="moments-card">
+              <h2>Story Moments</h2>
               <button
                 className="timeline-item"
-                key={e.id}
                 disabled={drawingBusy || !snapshot.isDirector || requestedGuest}
-                onClick={() => void run(() => client.rewind(e.revision))}
+                onClick={() => void run(() => client.rewind(0))}
               >
-                {String(e.revision).padStart(2, "0")} · {e.summary}
+                <i />
+                <span>
+                  <strong>The adventure begins</strong>
+                  <small>Restore the opening world</small>
+                </span>
               </button>
-            ))}
+              {snapshot.events.slice(-6).map((e) => (
+                <button
+                  className="timeline-item"
+                  key={e.id}
+                  disabled={
+                    drawingBusy || !snapshot.isDirector || requestedGuest
+                  }
+                  onClick={() => void run(() => client.rewind(e.revision))}
+                >
+                  <i />
+                  <span>
+                    <strong>
+                      {String(e.revision).padStart(2, "0")} · {e.summary}
+                    </strong>
+                  </span>
+                </button>
+              ))}
+            </div>
             {snapshot.proposals
               .filter((p) => p.status === "pending")
               .map((p) => (
