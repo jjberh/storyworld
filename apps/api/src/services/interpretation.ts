@@ -5,13 +5,18 @@ import {
   type EntityKind,
   type InterpretationInput,
   type InterpretationOutput,
+  type SceneInterpretationResponse,
 } from "@storyworld/contracts";
 import { ApiError } from "./errors";
 import { proposeWithGemini } from "./gemini";
+import { fixtureScene, interpretSceneWithGemini } from "./scene";
 
 export type Interpreter = {
   mode: "fixture" | "live";
   interpret(input: InterpretationInput): Promise<InterpretationOutput>;
+  interpretScene(
+    input: InterpretationInput,
+  ): Promise<SceneInterpretationResponse>;
 };
 
 type ProposableKind = Extract<EntityKind, "bridge" | "cloud" | "shelter">;
@@ -72,6 +77,7 @@ export function createInterpreter(
     return {
       mode: "fixture",
       interpret: async (input) => fixtureInterpretation(input),
+      interpretScene: async () => fixtureScene(),
     };
   const options = {
     apiKey,
@@ -117,5 +123,12 @@ export function createInterpreter(
         );
       return result.data;
     },
+    // A whole scene takes far longer than a single edit (about 7-9 s measured
+    // against gemini-3.6-flash), so it gets its own, longer limit.
+    interpretScene: (input) =>
+      interpretSceneWithGemini(input, {
+        ...options,
+        timeoutMs: positiveInteger(env.GEMINI_SCENE_TIMEOUT_MS, 20000),
+      }),
   };
 }
