@@ -1,10 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { initialSceneResponseSchema } from "@storyworld/contracts";
-import { applyOperation, initialWorld } from "@storyworld/contracts/simulation";
-import type { WorldOperation } from "@storyworld/contracts";
+import { sceneInterpretationResponseSchema } from "@storyworld/contracts";
 import { buildApp } from "./app";
 import { createInterpreter } from "./services/interpretation";
-import { sceneInterpretationOutput } from "./services/scene";
+import { fixtureScene } from "./services/scene";
 
 const API_KEY = "test-gemini-key-scene";
 const png = "data:image/png;base64,iVBORw0KGgo=";
@@ -62,15 +60,6 @@ async function scene(app: ReturnType<typeof buildApp>, payload: object) {
   return app.inject({ method: "POST", url: "/api/interpret/scene", payload });
 }
 
-// A brand-new world, which is what a scene proposal is meant to populate.
-function emptyWorld() {
-  return { ...initialWorld("test"), entities: [], rules: [], goal: null };
-}
-
-function applyAll(operations: WorldOperation[]) {
-  return operations.reduce(applyOperation, emptyWorld());
-}
-
 afterEach(() => vi.restoreAllMocks());
 
 describe("live scene interpretation", () => {
@@ -83,47 +72,23 @@ describe("live scene interpretation", () => {
         transcript: "Sunny the dragon wants to visit the castle",
       });
       expect(res.statusCode).toBe(200);
-      const body = sceneInterpretationOutput.parse(res.json());
+      const body = sceneInterpretationResponseSchema.parse(res.json());
       expect(body.mode).toBe("live");
-      expect(initialSceneResponseSchema.safeParse(body.scene).success).toBe(
-        true,
-      );
-
-      const { operations, character, moodHints, openingNarration } = body.scene;
-      expect(operations.map((op) => op.type)).toEqual([
-        "CREATE_ENTITY",
-        "CREATE_ENTITY",
-        "CREATE_ENTITY",
-        "SET_GOAL",
-      ]);
-      const created = operations.flatMap((op) =>
-        op.type === "CREATE_ENTITY" ? [op.entity] : [],
-      );
-      expect(created.map((e) => e.kind)).toEqual([
+      expect(body.candidates.map(({ kind }) => kind)).toEqual([
         "character",
         "castle",
         "river",
       ]);
       // IDs are minted by the server, never taken from the model.
-      for (const entity of created)
-        expect(entity.id).toMatch(/^[a-z]+-[0-9a-f-]{36}$/);
-      expect(character).toEqual({
-        id: created[0]!.id,
-        name: "Sunny the Dragon",
-      });
-      expect(operations[3]).toEqual({
-        type: "SET_GOAL",
-        characterId: character.id,
-        targetId: created[1]!.id,
-      });
-      expect(moodHints).toEqual(["curious", "worried"]);
-      expect(openingNarration).toContain("Sunny");
-      expect(body.confidences).toEqual(
-        created.map((e, i) => ({
-          entityId: e.id,
-          confidence: [0.96, 0.9, 0.93][i],
-        })),
-      );
+      for (const candidate of body.candidates)
+        expect(candidate.id).toMatch(/^[a-z]+-[0-9a-f-]{36}$/);
+      expect(body.characterCandidateId).toBe(body.candidates[0]!.id);
+      expect(body.goalCandidateId).toBe(body.candidates[1]!.id);
+      expect(body.candidates.map(({ confidence }) => confidence)).toEqual([
+        0.96, 0.9, 0.93,
+      ]);
+      expect(body.moodHints).toEqual(["curious", "worried"]);
+      expect(body.openingNarration).toContain("Sunny");
 
       const [url, init] = fetchMock.mock.calls[0] as unknown as [
         string,
@@ -138,49 +103,52 @@ describe("live scene interpretation", () => {
     }
   });
 
-  it("proposes operations the world reducer accepts", async () => {
-    const app = liveApp(asFetch(async () => geminiReply(goodScene)));
-    try {
-      const res = await scene(app, { image: png });
-      const world = applyAll(res.json().scene.operations);
-      expect(world.entities).toHaveLength(3);
-      expect(world.goal).not.toBeNull();
-      expect(world.pathStatus).toBe("blocked");
-    } finally {
-      await app.close();
-    }
+  it("keeps confirmation references semantically valid", () => {
+    const valid = fixtureScene();
+    expect(
+      sceneInterpretationResponseSchema.safeParse({
+        ...valid,
+        characterCandidateId: "castle",
+      }).success,
+    ).toBe(false);
+    expect(
+      sceneInterpretationResponseSchema.safeParse({
+        ...valid,
+        candidates: [...valid.candidates, valid.candidates[0]],
+      }).success,
+    ).toBe(false);
   });
 
-  it("converts the model's picture-normalized boxes to world bounds", async () => {
+  it("returns image-normalized boxes for confirmation overlays", async () => {
     const app = liveApp(asFetch(async () => geminiReply(goodScene)));
     try {
       const res = await scene(app, { image: png });
-      const [heroOp, castleOp, riverOp] = res.json().scene.operations;
-      // x is 0-1000 in both spaces; y is 0-1000 in the box but 0-600 in the world.
-      expect(heroOp.entity.bounds).toEqual({
-        x: 120,
-        y: 288,
-        width: 90,
-        height: 84,
+      const [heroCandidate, castleCandidate, riverCandidate] =
+        res.json().candidates;
+      expect(heroCandidate.imageBounds).toEqual({
+        x: 0.12,
+        y: 0.48,
+        width: 0.09,
+        height: 0.14,
       });
-      expect(castleOp.entity.bounds).toEqual({
-        x: 730,
-        y: 222,
-        width: 150,
-        height: 162,
+      expect(castleCandidate.imageBounds).toEqual({
+        x: 0.73,
+        y: 0.37,
+        width: 0.15,
+        height: 0.27,
       });
-      expect(riverOp.entity.bounds).toEqual({
-        x: 420,
+      expect(riverCandidate.imageBounds).toEqual({
+        x: 0.42,
         y: 0,
-        width: 120,
-        height: 600,
+        width: 0.12,
+        height: 1,
       });
     } finally {
       await app.close();
     }
   });
 
-  it("gives tiny boxes a minimum size and keeps them in the world", async () => {
+  it("keeps small boxes inside normalized image space", async () => {
     const sprawling = {
       ...goodScene,
       objects: [
@@ -192,19 +160,12 @@ describe("live scene interpretation", () => {
     try {
       const res = await scene(app, { image: png });
       expect(res.statusCode).toBe(200);
-      const created = res
-        .json()
-        .scene.operations.filter(
-          (op: WorldOperation) => op.type === "CREATE_ENTITY",
-        )
-        .map((op: { entity: { bounds: Record<string, number> } }) => op.entity);
-      for (const { bounds } of created) {
-        expect(Number.isInteger(bounds.x)).toBe(true);
-        expect(bounds.x + bounds.width).toBeLessThanOrEqual(1000);
-        expect(bounds.y + bounds.height).toBeLessThanOrEqual(600);
-        expect(bounds.width).toBeGreaterThanOrEqual(10);
+      for (const { imageBounds } of res.json().candidates) {
+        expect(imageBounds.x + imageBounds.width).toBeLessThanOrEqual(1);
+        expect(imageBounds.y + imageBounds.height).toBeLessThanOrEqual(1);
+        expect(imageBounds.width).toBeGreaterThan(0);
+        expect(imageBounds.height).toBeGreaterThan(0);
       }
-      expect(() => applyAll(res.json().scene.operations)).not.toThrow();
     } finally {
       await app.close();
     }
@@ -227,9 +188,7 @@ describe("live scene interpretation", () => {
       const kinds = async (payload: object) =>
         (await scene(app, payload))
           .json()
-          .scene.operations.flatMap(
-            (op: { entity?: { kind: string } }) => op.entity?.kind ?? [],
-          );
+          .candidates.map(({ kind }: { kind: string }) => kind);
       expect(await kinds({ image: png })).toContain("shelter");
       const named = await kinds({
         image: png,
@@ -259,9 +218,7 @@ describe("live scene interpretation", () => {
       const res = await scene(app, { image: png });
       const names = res
         .json()
-        .scene.operations.flatMap(
-          (op: { entity?: { name: string } }) => op.entity?.name ?? [],
-        );
+        .candidates.map(({ name }: { name: string }) => name);
       expect(names).toEqual(["Sunny the Dragon", "Tall Castle", "Blue River"]);
     } finally {
       await app.close();
@@ -275,14 +232,7 @@ describe("live scene interpretation", () => {
       for (const image of [jpeg, webp]) {
         const res = await scene(app, { image });
         expect(res.statusCode).toBe(200);
-        // No castle means no goal to set.
-        expect(
-          res
-            .json()
-            .scene.operations.some(
-              (op: WorldOperation) => op.type === "SET_GOAL",
-            ),
-        ).toBe(false);
+        expect(res.json().goalCandidateId).toBeUndefined();
       }
     } finally {
       await app.close();
@@ -337,7 +287,7 @@ describe("live scene interpretation", () => {
             code: "INVALID_MODEL_OUTPUT",
             retryable: true,
           });
-          expect(res.json().scene).toBeUndefined();
+          expect(res.json().candidates).toBeUndefined();
         } finally {
           await app.close();
         }
@@ -358,7 +308,7 @@ describe("live scene interpretation", () => {
             code: "SCENE_NOT_RECOGNIZED",
             retryable: true,
           });
-          expect(res.json().scene).toBeUndefined();
+          expect(res.json().candidates).toBeUndefined();
         } finally {
           await app.close();
         }
@@ -558,17 +508,12 @@ describe("keyless scene fixture", () => {
         // No image is needed: the fixture never reads the picture.
         const res = await scene(app, {});
         expect(res.statusCode).toBe(200);
-        const body = sceneInterpretationOutput.parse(res.json());
+        const body = sceneInterpretationResponseSchema.parse(res.json());
         expect(body.mode).toBe("fixture");
-        expect(body.scene.character).toEqual({ id: "nova", name: "Nova" });
-        expect(body.scene.moodHints).toEqual(["curious", "worried"]);
-        const world = applyAll(body.scene.operations);
-        expect(world.pathStatus).toBe("blocked");
-        expect(world.goal).toEqual({
-          characterId: "nova",
-          targetId: "castle",
-        });
-        expect(body.confidences.map((c) => c.entityId).sort()).toEqual([
+        expect(body.characterCandidateId).toBe("nova");
+        expect(body.goalCandidateId).toBe("castle");
+        expect(body.moodHints).toEqual(["curious", "worried"]);
+        expect(body.candidates.map(({ id }) => id).sort()).toEqual([
           "castle",
           "nova",
           "river",

@@ -5,21 +5,18 @@ import {
   type EntityKind,
   type InterpretationInput,
   type InterpretationOutput,
+  type SceneInterpretationResponse,
 } from "@storyworld/contracts";
 import { ApiError } from "./errors";
 import { proposeWithGemini } from "./gemini";
-import {
-  fixtureScene,
-  interpretSceneWithGemini,
-  type SceneInterpretationOutput,
-} from "./scene";
+import { fixtureScene, interpretSceneWithGemini } from "./scene";
 
 export type Interpreter = {
   mode: "fixture" | "live";
   interpret(input: InterpretationInput): Promise<InterpretationOutput>;
   interpretScene(
     input: InterpretationInput,
-  ): Promise<SceneInterpretationOutput>;
+  ): Promise<SceneInterpretationResponse>;
 };
 
 type ProposableKind = Extract<EntityKind, "bridge" | "cloud" | "shelter">;

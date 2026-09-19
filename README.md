@@ -15,7 +15,7 @@ Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini
 
 ## Shared integration contracts
 
-Provider work can propose an `InitialSceneResponse`: ordered typed operations, opening narration, Nova's identity, and mood hints. It does not change the world directly. A confirmed `WorldEvent` is the handoff for visual and audio reactions; it carries a stable event ID, revision, readable summary, and the complete committed world state.
+Provider work proposes a `SceneInterpretationResponse`: image-space object candidates, confidence scores, opening narration, character and goal references, and mood hints. The child confirms or corrects those candidates before the application creates world operations. A confirmed `WorldEvent` is the handoff for visual and audio reactions; it carries a stable event ID, revision, readable summary, and the complete committed world state.
 
 ## Fastest start: Docker
 
@@ -95,39 +95,38 @@ Codes: `PROVIDER_TIMEOUT` (504), `PROVIDER_RATE_LIMITED` (503), `PROVIDER_UNAVAI
 
 ### Scene interpretation
 
-`POST /api/interpret/scene` turns an uploaded picture plus optional narration into a proposed opening scene. Send `{ "image": "data:image/png;base64,…", "transcript": "optional narration" }`; PNG, JPEG, and WebP data URLs are accepted. It returns a proposal only and never writes to SpacetimeDB:
+`POST /api/interpret/scene` turns an uploaded picture plus optional narration into proposed objects for confirmation. Send `{ "image": "data:image/png;base64,…", "transcript": "optional narration" }`; PNG, JPEG, and WebP data URLs are accepted. Image data URLs are limited to 4,000,000 characters, so browser clients should resize or compress large phone photos before sending them. It returns candidates only and never creates world operations or writes to SpacetimeDB:
 
 ```json
 {
   "mode": "live",
   "message": "A friendly sentence for the child.",
-  "scene": {
-    "operations": [
-      {
-        "type": "CREATE_ENTITY",
-        "entity": {
-          "id": "character-…",
-          "kind": "character",
-          "name": "Sunny",
-          "bounds": { "x": 105, "y": 275, "width": 170, "height": 155 }
-        }
-      },
-      "…",
-      {
-        "type": "SET_GOAL",
-        "characterId": "character-…",
-        "targetId": "castle-…"
-      }
-    ],
-    "openingNarration": "One warm sentence about the hero.",
-    "character": { "id": "character-…", "name": "Sunny" },
-    "moodHints": ["curious", "worried"]
-  },
-  "confidences": [{ "entityId": "character-…", "confidence": 0.95 }]
+  "candidates": [
+    {
+      "id": "character-…",
+      "kind": "character",
+      "name": "Sunny",
+      "confidence": 0.95,
+      "imageBounds": { "x": 0.105, "y": 0.458, "width": 0.17, "height": 0.258 }
+    },
+    {
+      "id": "castle-…",
+      "kind": "castle",
+      "name": "Tall Castle",
+      "confidence": 0.92,
+      "imageBounds": { "x": 0.71, "y": 0.2, "width": 0.2, "height": 0.35 }
+    }
+  ],
+  "openingNarration": "One warm sentence about the hero.",
+  "characterCandidateId": "character-…",
+  "goalCandidateId": "castle-…",
+  "moodHints": ["curious", "worried"]
 }
 ```
 
-`scene` is the shared `InitialSceneResponse`; `confidences` carries the per-object scores it has no field for. Gemini identifies only `character`, `castle`, `river`, `bridge`, `cloud`, and `shelter`, each with a box in its native format (0-1000 across the whole picture on both axes). The server stretches that into the 1000×600 world, mints the IDs, keeps at most one character, castle, and river, keeps every box inside the world, requires a character, and adds a `SET_GOAL` from the character to the castle when both exist. Without a key the route returns the fixed Nova, river, and castle scene with `"mode": "fixture"` and ignores the image.
+The response uses the shared `SceneInterpretationResponse` contract. `imageBounds` are normalized from 0 to 1 against the original picture, so the UI can place confirmation overlays without assuming an aspect ratio. Gemini identifies only `character`, `castle`, `river`, `bridge`, `cloud`, and `shelter`; the server mints candidate IDs, keeps at most one character, castle, and river, and requires a character. The application must wait for the child to confirm or correct candidates before converting them into world operations. Without a key the route returns fixed Nova, river, and castle candidates with `"mode": "fixture"` and ignores the image.
+
+Whole-scene requests may take 5-10 seconds. The browser client uses a 25-second abort for this endpoint and callers should show a non-blocking “reading your picture” state.
 
 In addition to the codes above, scene requests can return `IMAGE_REQUIRED` and `UNSUPPORTED_IMAGE` (400, not retryable: pick another picture) and `SCENE_NOT_RECOGNIZED` (422, retryable: no hero was found). The picture's bytes must match its declared type, so a mislabelled file is rejected before any model call.
 
