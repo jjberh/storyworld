@@ -38,6 +38,10 @@ export function App() {
     "Nova wants to reach the castle, but she is afraid of water.",
   );
   const container = useRef<HTMLDivElement>(null);
+  const pendingFeedback = useRef<{
+    revision: number;
+    fallback: string;
+  } | null>(null);
   const [width, setWidth] = useState(800);
   useEffect(() => {
     void client.connect().catch((e) => setError(String(e)));
@@ -50,6 +54,20 @@ export function App() {
     );
     observer.observe(container.current);
     return () => observer.disconnect();
+  }, [snapshot.world]);
+  useEffect(() => {
+    const pending = pendingFeedback.current;
+    const confirmed = snapshot.world;
+    if (!pending || !confirmed || confirmed.revision <= pending.revision)
+      return;
+    pendingFeedback.current = null;
+    setNote(
+      confirmed.pathStatus === "available"
+        ? "The bridge holds. Nova has a way through."
+        : confirmed.entities.some((entity) => entity.kind === "bridge")
+          ? "Almost there — the bridge needs to reach both riverbanks."
+          : pending.fallback,
+    );
   }, [snapshot.world]);
   async function run(action: () => Promise<void>) {
     setError("");
@@ -72,14 +90,24 @@ export function App() {
       });
       const candidate = result.candidates[0];
       if (candidate) {
-        if (contributor) await client.propose(candidate.operation);
-        else await client.apply(candidate.operation);
+        if (contributor) {
+          await client.propose(candidate.operation);
+          setNote("Your proposal is ready for the director.");
+        } else {
+          pendingFeedback.current = {
+            revision: world?.revision ?? -1,
+            fallback: result.message,
+          };
+          try {
+            await client.apply(candidate.operation);
+          } catch (error) {
+            pendingFeedback.current = null;
+            throw error;
+          }
+        }
+      } else {
+        setNote(result.message);
       }
-      setNote(
-        contributor
-          ? "Your proposal is ready for the director."
-          : result.message,
-      );
     });
   }
   const world = snapshot.world;
@@ -203,7 +231,7 @@ export function App() {
               </span>
             </div>
             <div className="paper" ref={container}>
-              <WorldStage world={world} />
+              <WorldStage world={world} latestEvent={snapshot.events.at(-1)} />
               <div className="drawing-layer">
                 <DrawingCanvas
                   key={

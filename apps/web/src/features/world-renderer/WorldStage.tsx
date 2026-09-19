@@ -1,10 +1,18 @@
 import { useEffect, useRef } from "react";
 import { Application, Graphics, Text } from "pixi.js";
-import type { WorldState } from "@storyworld/contracts/model";
-export function WorldStage({ world }: { world: WorldState }) {
+import type { WorldEvent, WorldState } from "@storyworld/contracts/model";
+export function WorldStage({
+  world,
+  latestEvent,
+}: {
+  world: WorldState;
+  latestEvent?: WorldEvent;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const state = useRef(world);
+  const event = useRef(latestEvent);
   state.current = world;
+  event.current = latestEvent;
   useEffect(() => {
     let disposed = false;
     const app = new Application();
@@ -30,10 +38,37 @@ export function WorldStage({ world }: { world: WorldState }) {
           },
         });
         app.stage.addChild(label);
+        const cue = new Text({
+          text: "",
+          style: {
+            fontFamily: "Georgia, serif",
+            fontSize: 18,
+            fill: "#315445",
+            fontStyle: "italic",
+          },
+        });
+        cue.anchor.set(0.5, 1);
+        app.stage.addChild(cue);
         let x = 190;
         let clock = 0;
+        let eventElapsed = 1200;
+        let activeEventId = event.current?.id;
+        const reduceMotion = window.matchMedia(
+          "(prefers-reduced-motion: reduce)",
+        ).matches;
         app.ticker.add((t) => {
           clock += t.deltaMS / 1000;
+          const latest = event.current;
+          if (latest?.id !== activeEventId) {
+            activeEventId = latest?.id;
+            eventElapsed = 0;
+          } else {
+            eventElapsed += t.deltaMS;
+          }
+          const bridgeEvent = latest?.summary.toLowerCase().includes("bridge");
+          const reveal = reduceMotion || !bridgeEvent
+            ? 1
+            : Math.min(1, eventElapsed / 700);
           const w = state.current;
           g.clear();
           g.ellipse(200, 555, 450, 130).fill("#d2e1b2");
@@ -60,9 +95,24 @@ export function WorldStage({ world }: { world: WorldState }) {
               g.roundRect(b.x + 50, b.y + 75, 40, 75, 18).fill("#855f52");
             }
             if (e.kind === "bridge") {
-              g.roundRect(b.x, b.y, b.width, b.height, 5).fill("#ac7554");
-              for (let i = 10; i < b.width; i += 18)
-                g.rect(b.x + i, b.y, 2, b.height).fill("#deb08a");
+              const shownWidth = Math.max(8, b.width * reveal);
+              const nearMiss = w.pathStatus === "blocked";
+              g.roundRect(b.x, b.y, shownWidth, b.height, 5).fill(
+                nearMiss ? "#bd765c" : "#ac7554",
+              );
+              for (let i = 10; i < shownWidth; i += 18)
+                g.rect(b.x + i, b.y, 2, b.height).fill(
+                  nearMiss ? "#e0a080" : "#deb08a",
+                );
+              if (nearMiss) {
+                g.rect(b.x - 5, b.y - 8, 8, b.height + 16).fill("#d45f50");
+                g.rect(
+                  b.x + b.width - 3,
+                  b.y - 8,
+                  8,
+                  b.height + 16,
+                ).fill("#d45f50");
+              }
             }
             if (e.kind === "cloud") {
               g.ellipse(
@@ -81,7 +131,8 @@ export function WorldStage({ world }: { world: WorldState }) {
             }
           }
           const target = w.pathStatus === "available" ? 690 : 320;
-          x += (target - x) * Math.min(1, t.deltaMS / 900);
+          if (reduceMotion) x = target;
+          else x += (target - x) * Math.min(1, t.deltaMS / 900);
           nova
             .clear()
             .ellipse(0, 0, 35, 25)
@@ -98,8 +149,25 @@ export function WorldStage({ world }: { world: WorldState }) {
             .fill("#537950")
             .roundRect(12, 16, 12, 16, 4)
             .fill("#537950");
-          nova.position.set(x, 340 + Math.sin(clock * 4) * 3);
+          const blockedWobble =
+            !reduceMotion && w.pathStatus === "blocked" && eventElapsed < 900
+              ? Math.sin(eventElapsed / 70) * 4
+              : 0;
+          nova.position.set(x + blockedWobble, 340 + Math.sin(clock * 4) * 3);
           label.position.set(x - 30, 395);
+          if (w.pathStatus === "available") {
+            cue.text = reveal < 1 ? "A way through!" : "Nova can reach the castle";
+            cue.style.fill = "#315445";
+            cue.position.set(510, 250);
+          } else if (w.entities.some((e) => e.kind === "bridge")) {
+            cue.text = "Almost — reach both riverbanks";
+            cue.style.fill = "#a44d3f";
+            cue.position.set(480, 250);
+          } else {
+            cue.text = "The river is in the way";
+            cue.style.fill = "#315445";
+            cue.position.set(340, 250);
+          }
         });
       });
     return () => {

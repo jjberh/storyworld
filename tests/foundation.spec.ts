@@ -55,6 +55,8 @@ test("a drawn bridge goes through the API and opens the route", async ({
   await expect(
     page.getByText("Route opened", { exact: false }).first(),
   ).toBeVisible();
+  await expect(
+    page.getByText("The bridge holds. Nova has a way through."),
+  ).toBeVisible();
   expect(errors).toEqual([]);
 });
-
