@@ -21,7 +21,7 @@ export function App() {
   const mode =
     params.get("mode") ?? import.meta.env.VITE_WORLD_MODE ?? "fixture";
   const room = params.get("world") ?? "nova";
-  const guest = location.pathname.startsWith("/join");
+  const requestedGuest = location.pathname.startsWith("/join");
   const client = useMemo<WorldClient>(
     () =>
       mode === "live" ? new LiveWorldClient(room) : new FixtureWorldClient(),
@@ -72,15 +72,20 @@ export function App() {
       });
       const candidate = result.candidates[0];
       if (candidate) {
-        if (guest) await client.propose(candidate.operation);
+        if (contributor) await client.propose(candidate.operation);
         else await client.apply(candidate.operation);
       }
       setNote(
-        guest ? "Your proposal is ready for the director." : result.message,
+        contributor
+          ? "Your proposal is ready for the director."
+          : result.message,
       );
     });
   }
   const world = snapshot.world;
+  // The route chooses the initial flow; confirmed room ownership determines
+  // whether this browser can make a direct change after the room loads.
+  const contributor = requestedGuest || (!!world && !snapshot.isDirector);
   return (
     <main className="shell">
       <header>
@@ -110,8 +115,10 @@ export function App() {
           <span>YOUR STORY ROOM</span>
           <strong>{world?.id ?? room}</strong>
           <small>
-            {guest
-              ? "Guest contribution view"
+            {contributor
+              ? requestedGuest
+                ? "Guest contribution view"
+                : "This room belongs to another director. Propose a change instead."
               : snapshot.isDirector
                 ? "You are the director"
                 : "Join or create a world"}
@@ -157,12 +164,14 @@ export function App() {
           <button
             onClick={() =>
               void run(() =>
-                guest ? client.joinWorld(room) : client.createWorld(room),
+                requestedGuest
+                  ? client.joinWorld(room)
+                  : client.createWorld(room),
               )
             }
             disabled={busy || snapshot.status !== "ready"}
           >
-            {guest ? "Join" : "Create"} {room}
+            {requestedGuest ? "Join" : "Create"} {room}
           </button>
           <a href="/?mode=fixture">Use local fixture</a>
         </section>
@@ -247,27 +256,27 @@ export function App() {
                 disabled={busy}
                 onClick={() =>
                   void run(() =>
-                    guest
+                    contributor
                       ? client.propose(bridgeOperation())
                       : client.apply(bridgeOperation()),
                   )
                 }
               >
-                {guest ? "Propose" : "Add"} sample bridge
+                {contributor ? "Propose" : "Add"} sample bridge
               </button>
               <button
                 disabled={busy}
                 onClick={() =>
                   void run(() =>
-                    guest
+                    contributor
                       ? client.propose(cloudOperation())
                       : client.apply(cloudOperation()),
                   )
                 }
               >
-                {guest ? "Propose" : "Add"} storm cloud
+                {contributor ? "Propose" : "Add"} storm cloud
               </button>
-              {snapshot.isDirector && !guest && (
+              {snapshot.isDirector && !requestedGuest && (
                 <button
                   className="quiet"
                   disabled={busy}
@@ -281,7 +290,7 @@ export function App() {
             <p className="eyebrow">STORY MOMENTS</p>
             <button
               className="timeline-item"
-              disabled={busy || !snapshot.isDirector || guest}
+              disabled={busy || !snapshot.isDirector || requestedGuest}
               onClick={() => void run(() => client.rewind(0))}
             >
               00 · The adventure begins
@@ -290,7 +299,7 @@ export function App() {
               <button
                 className="timeline-item"
                 key={e.id}
-                disabled={busy || !snapshot.isDirector || guest}
+                disabled={busy || !snapshot.isDirector || requestedGuest}
                 onClick={() => void run(() => client.rewind(e.revision))}
               >
                 {String(e.revision).padStart(2, "0")} · {e.summary}

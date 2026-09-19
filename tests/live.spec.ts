@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-test("live director and guest synchronize an approved bridge", async ({
+test("live director and contributor synchronize an approved bridge", async ({
   browser,
 }) => {
   test.skip(
@@ -15,7 +15,14 @@ test("live director and guest synchronize an approved bridge", async ({
     await a.goto("/?mode=live&world=" + room);
     await a.getByRole("button", { name: "Create " + room }).click();
     await expect(a.getByText("River blocks the route")).toBeVisible();
-    await b.goto("/join?mode=live&world=" + room);
+    // A second identity may use the root room URL. It must become a contributor
+    // instead of attempting the director-only reducer.
+    await b.goto("/?mode=live&world=" + room);
+    await expect(
+      b.getByText(
+        "This room belongs to another director. Propose a change instead.",
+      ),
+    ).toBeVisible();
     await b.getByRole("button", { name: "Propose sample bridge" }).click();
     await expect(a.getByText("New guest contribution")).toBeVisible();
     await a.getByRole("button", { name: "Accept", exact: true }).click();
