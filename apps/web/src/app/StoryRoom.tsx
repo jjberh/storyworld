@@ -1,5 +1,5 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { bridgeOperation, cloudOperation } from "@storyworld/world-fixtures";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { cloudOperation } from "@storyworld/world-fixtures";
 import type {
   ClientSnapshot,
   RoomParticipant,
@@ -8,6 +8,9 @@ import type {
 import { LiveWorldClient } from "../services/world-client";
 import { peekWorldClient, type RoomMode } from "../services/world-session";
 import paintbrushIcon from "../assets/figma/paintbrush.svg";
+import { PaperTheaterStage } from "../features/world-renderer/PaperTheaterStage";
+import { sequenceFromCommittedEvents } from "../features/world-renderer/committed-story-sequence";
+import { bridgeOperationForWorld } from "./story-room-operations";
 
 const emptySnapshot: ClientSnapshot = {
   status: "ready",
@@ -99,6 +102,15 @@ export function StoryRoom({ worldId }: { worldId: string }) {
   const world = snapshot.world;
   const scene = snapshot.scene;
   const contributor = requestedGuest || (!!world && !snapshot.isDirector);
+  const latestEvent = snapshot.events.at(-1);
+  const previousEvent = snapshot.events.at(-2);
+  const sequence = useMemo(
+    () =>
+      latestEvent
+        ? sequenceFromCommittedEvents(latestEvent, previousEvent)
+        : null,
+    [latestEvent?.id, previousEvent?.id],
+  );
 
   if (session.missingFixture)
     return (
@@ -176,8 +188,8 @@ export function StoryRoom({ worldId }: { worldId: string }) {
             <div className="drawing-intro">
               <h2>The story so far</h2>
               <p>
-                This is the confirmed picture. Animation of the drawing comes
-                next; the room and its events are already shared.
+                The confirmed drawing is now a living paper stage. Its pieces
+                move only when the shared world commits a new story moment.
               </p>
             </div>
             <div className="canvas-tools">
@@ -190,11 +202,21 @@ export function StoryRoom({ worldId }: { worldId: string }) {
               </span>
             </div>
             <div className="paper room-paper">
-              <img
-                className="room-picture"
-                src={scene?.document.drawing.compositeImage}
-                alt="Your confirmed drawing"
-              />
+              {scene ? (
+                <PaperTheaterStage
+                  scene={scene}
+                  world={world}
+                  sequence={sequence}
+                />
+              ) : (
+                <div
+                  className="room-picture-fallback"
+                  role="img"
+                  aria-label="The confirmed picture is unavailable."
+                >
+                  The confirmed picture will appear here.
+                </div>
+              )}
             </div>
           </div>
           <aside>
@@ -245,8 +267,8 @@ export function StoryRoom({ worldId }: { worldId: string }) {
                   onClick={() =>
                     void run(() =>
                       contributor
-                        ? client!.propose(bridgeOperation())
-                        : client!.apply(bridgeOperation()),
+                        ? client!.propose(bridgeOperationForWorld(world))
+                        : client!.apply(bridgeOperationForWorld(world)),
                     )
                   }
                 >
