@@ -99,6 +99,12 @@ export interface WorldClient {
   rewind(revision: number): Promise<void>;
   dispose(): void;
 }
+export type RoomParticipant = {
+  id: string;
+  identity: string;
+  role: "director" | "guest";
+  isYou: boolean;
+};
 export type ClientSnapshot = {
   scene?: import("./index").ConfirmedScene;
   status: "connecting" | "ready" | "error";
@@ -106,6 +112,7 @@ export type ClientSnapshot = {
   world: WorldState | null;
   events: WorldEvent[];
   proposals: Proposal[];
+  participants: RoomParticipant[];
   isDirector: boolean;
   mode: "fixture" | "live";
 };

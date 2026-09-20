@@ -7,6 +7,7 @@ import {
   type WorldOperation,
   type WorldState,
   type Proposal,
+  type RoomParticipant,
 } from "@storyworld/contracts/model";
 import {
   operationSchema,
@@ -28,6 +29,7 @@ export class LiveWorldClient implements WorldClient {
     world: null,
     events: [],
     proposals: [],
+    participants: [],
     isDirector: false,
   };
   constructor(private room: string) {}
@@ -86,6 +88,8 @@ export class LiveWorldClient implements WorldClient {
         conn.db.proposal.onInsert(refresh);
         conn.db.proposal.onUpdate(refresh);
         conn.db.proposal.onDelete(refresh);
+        conn.db.participant.onInsert(refresh);
+        conn.db.participant.onDelete(refresh);
         conn
           .subscriptionBuilder()
           .onApplied(() => {
@@ -103,6 +107,9 @@ export class LiveWorldClient implements WorldClient {
             tables.metadata,
             tables.storyDocument.where((document) =>
               document.worldId.eq(this.room),
+            ),
+            tables.participant.where((participant) =>
+              participant.worldId.eq(this.room),
             ),
           ]);
       })
@@ -165,13 +172,29 @@ export class LiveWorldClient implements WorldClient {
               ? "rejected"
               : "pending",
       }));
+    const you = conn.identity;
+    const owner = row?.owner;
+    const participants: RoomParticipant[] = [...conn.db.participant.iter()]
+      .filter((p) => p.worldId === this.room)
+      .map((p): RoomParticipant => ({
+        id: p.id,
+        identity: p.identity.toHexString(),
+        role: owner && p.identity.isEqual(owner) ? "director" : "guest",
+        isYou: !!you && p.identity.isEqual(you),
+      }))
+      .sort((a, b) => {
+        if (a.role !== b.role) return a.role === "director" ? -1 : 1;
+        if (a.isYou !== b.isYou) return a.isYou ? -1 : 1;
+        return a.id.localeCompare(b.id);
+      });
     this.snapshot = {
       status: "ready",
       mode: "live",
       world,
       events,
       proposals,
-      isDirector: !!row && !!conn.identity && row.owner.isEqual(conn.identity),
+      participants,
+      isDirector: !!row && !!you && row.owner.isEqual(you),
       scene: conn.db.storyDocument.worldId.find(this.room)
         ? confirmedSceneSchema.parse(
             JSON.parse(conn.db.storyDocument.worldId.find(this.room)!.scene),
