@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./model": "./src/model.ts",
     "./simulation": "./src/simulation.ts",
-    "./scene": "./src/scene.ts"
+    "./scene": "./src/scene.ts",
+    "./story-beat": "./src/story-beat.ts"
   },
   "dependencies": {
     "zod": "^4.1.0"
