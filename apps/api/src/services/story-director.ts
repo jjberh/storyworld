@@ -19,6 +19,43 @@ export type StoryDirector = {
   direct(request: StorySequenceRequest): Promise<DirectedBeat[]>;
 };
 
+function storyFingerprint(request: StorySequenceRequest) {
+  return JSON.stringify({
+    committedEvent: request.committedEvent,
+    committedWorld: request.committedWorld,
+    previousCommittedWorld: request.previousCommittedWorld,
+    childDescription: request.childDescription ?? null,
+    openingNarration: request.openingNarration ?? null,
+  });
+}
+
+export function cacheStoryDirector(
+  director: StoryDirector,
+  limit = 100,
+): StoryDirector {
+  if (director.mode === "fixture") return director;
+  const cache = new Map<string, Promise<DirectedBeat[]>>();
+  return {
+    mode: director.mode,
+    direct(request) {
+      const key = storyFingerprint(request);
+      const existing = cache.get(key);
+      if (existing) return existing;
+
+      const pending = director.direct(request);
+      cache.set(key, pending);
+      if (cache.size > limit) {
+        const oldest = cache.keys().next().value;
+        if (oldest !== undefined) cache.delete(oldest);
+      }
+      void pending.catch(() => {
+        if (cache.get(key) === pending) cache.delete(key);
+      });
+      return pending;
+    },
+  };
+}
+
 const modelBeatSchema = z
   .object({
     narration: z.string().trim().min(1).max(240),
@@ -364,12 +401,14 @@ export function createStoryDirector(
       mode: "fixture",
       direct: async (request) => fixtureBeats(request),
     };
-  return liveDirector({
-    apiKey,
-    model: env.GEMINI_MODEL?.trim() || "gemini-3.6-flash",
-    timeoutMs: positiveInteger(env.GEMINI_TIMEOUT_MS, 8000),
-    fetch: fetchImpl,
-  });
+  return cacheStoryDirector(
+    liveDirector({
+      apiKey,
+      model: env.GEMINI_MODEL?.trim() || "gemini-3.6-flash",
+      timeoutMs: positiveInteger(env.GEMINI_TIMEOUT_MS, 8000),
+      fetch: fetchImpl,
+    }),
+  );
 }
 
 export async function directStorySequence(

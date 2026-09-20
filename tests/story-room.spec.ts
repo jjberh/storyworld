@@ -56,6 +56,142 @@ async function startRoom(page: Page) {
   );
 }
 
+test("Story Room plays a fresh server-directed sequence", async ({ page }) => {
+  await page.route("**/api/story/sequence", async (route) => {
+    const request = route.request().postDataJSON();
+    await route.fulfill({
+      json: {
+        mode: "fixture",
+        requestId: request.requestId,
+        sourceRevision: request.committedEvent.revision,
+        sourceEventId: request.committedEvent.id,
+        beats: [
+          {
+            id: "beat-1",
+            narration: "The server directs this committed moment.",
+            mood: "curious",
+            action: { type: "focus", entityId: "fox" },
+          },
+        ],
+      },
+    });
+  });
+  await startRoom(page);
+  await expect(page.locator(".paper-theater-caption")).toContainText(
+    "The server directs this committed moment.",
+  );
+});
+
+test("Story Room explains API failure and plays the local fallback", async ({
+  page,
+}) => {
+  await page.route("**/api/story/sequence", (route) =>
+    route.fulfill({
+      status: 502,
+      json: {
+        code: "PROVIDER_FAILED",
+        message: "The story director had a problem.",
+        retryable: true,
+      },
+    }),
+  );
+  await startRoom(page);
+  await expect(page.getByRole("status")).toContainText(
+    "playing the committed moment locally",
+  );
+  await expect(page.locator(".paper-theater-caption")).not.toHaveText(
+    "The paper theater is ready.",
+  );
+});
+
+test("a committed bridge stays visible while directing is delayed", async ({
+  page,
+}) => {
+  let releaseBridge!: () => void;
+  const bridgeGate = new Promise<void>((resolve) => {
+    releaseBridge = resolve;
+  });
+  await page.route("**/api/story/sequence", async (route) => {
+    const request = route.request().postDataJSON();
+    if (request.committedEvent.revision > 0) await bridgeGate;
+    const bridge = request.committedWorld.entities.find(
+      (entity: { kind: string }) => entity.kind === "bridge",
+    );
+    await route.fulfill({
+      json: {
+        mode: "fixture",
+        requestId: request.requestId,
+        sourceRevision: request.committedEvent.revision,
+        sourceEventId: request.committedEvent.id,
+        beats: [
+          {
+            id: "beat-1",
+            narration: bridge ? "The bridge is ready." : "Fox looks ahead.",
+            mood: "curious",
+            action: bridge
+              ? { type: "reveal", entityId: bridge.id }
+              : { type: "focus", entityId: "fox" },
+          },
+        ],
+      },
+    });
+  });
+  await startRoom(page);
+  await page.getByRole("button", { name: "Add sample bridge" }).click();
+  const bridge = page.locator('[data-entity-id^="bridge"]');
+  await expect(bridge).toBeVisible();
+  await expect(bridge).toHaveAttribute("data-reveal-state", "visible");
+  releaseBridge();
+  await expect(page.locator(".paper-theater-caption")).toContainText(
+    "The bridge is ready.",
+  );
+});
+
+test("a delayed older response cannot replace the newest event", async ({
+  page,
+}) => {
+  let releaseOpening!: () => void;
+  const openingGate = new Promise<void>((resolve) => {
+    releaseOpening = resolve;
+  });
+  await page.route("**/api/story/sequence", async (route) => {
+    const request = route.request().postDataJSON();
+    if (request.committedEvent.revision === 0) await openingGate;
+    const bridge = request.committedWorld.entities.find(
+      (entity: { kind: string }) => entity.kind === "bridge",
+    );
+    await route.fulfill({
+      json: {
+        mode: "fixture",
+        requestId: request.requestId,
+        sourceRevision: request.committedEvent.revision,
+        sourceEventId: request.committedEvent.id,
+        beats: [
+          {
+            id: "beat-1",
+            narration: bridge
+              ? "The newest bridge moment wins."
+              : "This older opening must stay stale.",
+            mood: "curious",
+            action: bridge
+              ? { type: "reveal", entityId: bridge.id }
+              : { type: "focus", entityId: "fox" },
+          },
+        ],
+      },
+    });
+  });
+  await startRoom(page);
+  await page.getByRole("button", { name: "Add sample bridge" }).click();
+  await expect(page.locator(".paper-theater-caption")).toContainText(
+    "The newest bridge moment wins.",
+  );
+  releaseOpening();
+  await expect(page.locator(".paper-theater-caption")).not.toContainText(
+    "This older opening must stay stale.",
+  );
+});
+
 test("starting a story opens an addressable room with the confirmed picture", async ({
   page,
   context,
@@ -71,7 +207,7 @@ test("starting a story opens an addressable room with the confirmed picture", as
   ).toBeVisible();
   await expect(page.locator(".paper-theater-caption")).toBeVisible();
   await expect(page.getByText(/move only when.*commits/i)).toBeVisible();
-  await expect(page.getByText("Fox explores.")).toBeVisible();
+  await expect(page.locator(".intro").getByText("Fox explores.")).toBeVisible();
   await page.getByRole("button", { name: "Copy guest link" }).click();
   const world = new URL(page.url()).searchParams.get("world");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(

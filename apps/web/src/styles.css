@@ -510,6 +510,12 @@ input:focus-visible {
     serif;
   text-align: center;
 }
+.director-status {
+  margin: 8px 12px 0;
+  color: #5b4076;
+  font-size: 0.86rem;
+  text-align: center;
+}
 .paper-theater-fallback,
 .room-picture-fallback {
   display: grid;

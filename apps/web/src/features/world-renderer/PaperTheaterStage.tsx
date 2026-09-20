@@ -120,10 +120,12 @@ export function PaperTheaterStage({
   scene,
   world,
   sequence,
+  keepCommittedRevealsVisible = false,
 }: {
   scene: ConfirmedScene;
   world: WorldState;
   sequence: StorySequence | null;
+  keepCommittedRevealsVisible?: boolean;
 }) {
   const [offsets, setOffsets] = useState<Record<string, Offset>>({});
   const [placements, setPlacements] = useState<Record<string, Placement>>({});
@@ -145,6 +147,7 @@ export function PaperTheaterStage({
   )?.action;
   const pendingRevealId =
     revealEntityId?.type === "reveal" &&
+    !keepCommittedRevealsVisible &&
     completedRevealEventId !== sequence?.sourceEventId
       ? revealEntityId.entityId
       : undefined;
