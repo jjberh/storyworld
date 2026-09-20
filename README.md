@@ -11,7 +11,7 @@ Add a storm cloud -> the world becomes rainy.
 Reset or rewind -> the semantic world returns to an earlier revision.
 ```
 
-Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` does the same for an uploaded picture. The ElevenLabs routes still return `501` until those integrations are implemented.
+Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` does the same for an uploaded picture, and `POST /api/story/sequence` directs one committed event into one to three validated presentation beats. The ElevenLabs routes still return `501` until those integrations are implemented.
 
 ## Shared integration contracts
 
@@ -63,9 +63,10 @@ Living-story sequences use the strict, presentation-only contract in `@storyworl
 
 - Gemini may propose 1 to 3 **story beats**. Each has an ID, short narration (240 characters at most), a mood, and exactly one action from a fixed set: `focus`, `move_toward`, `blocked_by`, `reveal`, `weather_shift`, or `celebrate`.
 - Beats reference confirmed entities only. `validateStorySequenceForWorld(sequence, world)` rejects any unknown entity ID and any role that does not fit the golden loop: a character moves toward something or is blocked, a river blocks, and a cloud causes weather. It never mutates the sequence or the world.
-- A sequence is tied to a committed revision and event: `requestId`, `sourceRevision`, and `sourceEventId` are attached by the API server, never by the model. A client can discard a sequence whose revision or event is no longer current, that a newer request has replaced, or that mentions an entity that no longer exists.
+- A sequence carries client-supplied correlation and freshness tokens: `requestId`, `sourceRevision`, and `sourceEventId` are validated and echoed by the API server, never supplied by the model. The endpoint does not authenticate database provenance; callers must submit snapshots they obtained from their trusted committed-event subscription. A client can discard a sequence whose revision or event is no longer current, that a newer request has replaced, or that mentions an entity that no longer exists.
 - Beats are presentation data and never change the world. They carry no coordinates, durations, easing, CSS, component names, world operations, audio, or video. The renderer decides timing and visuals.
-- Story Room provides deterministic committed-event sequences and a paper-theater renderer without provider keys. A Gemini story endpoint remains subsequent work.
+- `POST /api/story/sequence` accepts a request ID, an event token (`id`, `revision`, and `summary`), its current `committedWorld`, and the required `previousCommittedWorld` snapshot (`null` only for revision zero), plus optional child description and opening narration. Structural deltas determine event relevance. Without a Gemini key it returns the deterministic fixture sequence; with a key Gemini chooses only narration, mood, and a bounded action. The server constructs response metadata and validates entity roles, current weather, and relevance to the submitted delta. Request bodies are capped at 1 MiB. Live provider failures are explicit and never fall back to fixture.
+- Story Room continues to provide its existing deterministic committed-event sequences and paper-theater renderer; this API-only change does not wire the endpoint into the web room.
 
 ## Fastest start: Docker
 
@@ -136,7 +137,7 @@ Never prefix provider secrets with `VITE_`, commit `.env`, or paste keys into an
 
 ### Gemini interpretation behavior
 
-With a key, `/api/interpret/edit` sends the narration and drawing to Gemini with a structured-output schema. Gemini only chooses what the child added (`bridge`, `cloud`, or `shelter`), a friendly name, and a confidence; the server builds the `CREATE_ENTITY` operation with its own ID and the drawn `changedRegion` as bounds, then validates it with the shared contract. Nothing from the model writes to SpacetimeDB. `/api/health` reports `providerMode` as `live` or `fixture`.
+With a key, `/api/interpret/edit` sends the narration and drawing to Gemini with a structured-output schema. Gemini only chooses what the child added (`bridge`, `cloud`, or `shelter`), a friendly name, and a confidence; the server builds the `CREATE_ENTITY` operation with its own ID and the drawn `changedRegion` as bounds, then validates it with the shared contract. Nothing from the model writes to SpacetimeDB. `/api/health` reports `providerMode` and `storyProviderMode` as `live` or `fixture`.
 
 If Gemini fails, the route does not fall back to the fixture. It returns a recoverable error and the drawing is untouched:
 

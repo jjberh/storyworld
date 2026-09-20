@@ -64,13 +64,32 @@ export type GeminiOptions = {
   fetch: typeof fetch;
 };
 
-export function invalidModelOutput() {
-  return new ApiError(
-    502,
-    "INVALID_MODEL_OUTPUT",
+export type StructuredErrorMessages = Partial<{
+  invalidOutput: string;
+  timeout: string;
+  unavailable: string;
+  rateLimited: string;
+  authFailed: string;
+  failed: string;
+}>;
+
+const defaultErrors = {
+  invalidOutput:
     "The drawing helper gave an answer we could not use. Your drawing is preserved; try again.",
-    true,
-  );
+  timeout:
+    "The drawing helper took too long. Your drawing is preserved; try again.",
+  unavailable:
+    "The drawing helper is unavailable. Your drawing is preserved; try again.",
+  rateLimited:
+    "The drawing helper is busy. Your drawing is preserved; try again in a moment.",
+  authFailed:
+    "The drawing helper is not set up correctly. Your drawing is preserved.",
+  failed:
+    "The drawing helper had a problem. Your drawing is preserved; try again.",
+};
+
+export function invalidModelOutput(message = defaultErrors.invalidOutput) {
+  return new ApiError(502, "INVALID_MODEL_OUTPUT", message, true);
 }
 
 // Magic bytes for the formats we accept, checked against the declared type so
@@ -115,8 +134,10 @@ export async function generateStructured<T>(
     systemInstruction: string;
     parts: object[];
     schema: z.ZodType<T>;
+    errorMessages?: StructuredErrorMessages;
   },
 ): Promise<T> {
+  const messages = { ...defaultErrors, ...request.errorMessages };
   let response: Response;
   try {
     response = await options.fetch(
@@ -143,38 +164,24 @@ export async function generateStructured<T>(
     );
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError")
-      throw new ApiError(
-        504,
-        "PROVIDER_TIMEOUT",
-        "The drawing helper took too long. Your drawing is preserved; try again.",
-        true,
-      );
-    throw new ApiError(
-      502,
-      "PROVIDER_UNAVAILABLE",
-      "The drawing helper is unavailable. Your drawing is preserved; try again.",
-      true,
-    );
+      throw new ApiError(504, "PROVIDER_TIMEOUT", messages.timeout, true);
+    throw new ApiError(502, "PROVIDER_UNAVAILABLE", messages.unavailable, true);
   }
 
   if (response.status === 429)
     throw new ApiError(
       503,
       "PROVIDER_RATE_LIMITED",
-      "The drawing helper is busy. Your drawing is preserved; try again in a moment.",
+      messages.rateLimited,
       true,
     );
   if (response.status === 401 || response.status === 403)
-    throw new ApiError(
-      502,
-      "PROVIDER_AUTH_FAILED",
-      "The drawing helper is not set up correctly. Your drawing is preserved.",
-    );
+    throw new ApiError(502, "PROVIDER_AUTH_FAILED", messages.authFailed);
   if (!response.ok)
     throw new ApiError(
       502,
       "PROVIDER_FAILED",
-      "The drawing helper had a problem. Your drawing is preserved; try again.",
+      messages.failed,
       response.status >= 500,
     );
 
@@ -184,11 +191,11 @@ export async function generateStructured<T>(
     const text = envelope.candidates?.[0]?.content?.parts.find(
       (part) => part.text && !part.thought,
     )?.text;
-    if (!text) throw invalidModelOutput();
+    if (!text) throw invalidModelOutput(messages.invalidOutput);
     return request.schema.parse(JSON.parse(text));
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw invalidModelOutput();
+    throw invalidModelOutput(messages.invalidOutput);
   }
 }
 
