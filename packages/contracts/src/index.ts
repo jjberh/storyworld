@@ -1,58 +1,26 @@
 import { z } from "zod";
+import { storyMoodSchema } from "./story-schema";
+import { boundsSchema, entitySchema, operationSchema } from "./world-schema";
 export * from "./model";
-// Types only: the schemas import `storyMoodSchema` from this file, so a value
-// re-export would be a circular import. Use `@storyworld/contracts/story-beat`
-// for the schemas and `validateStorySequenceForWorld`.
+export { storyMoodSchema };
+export {
+  entityIdSchema,
+  entityKindSchema,
+  ruleSchema,
+  worldStateSchema,
+} from "./world-schema";
+export { boundsSchema, entitySchema, operationSchema };
+// Story-beat values stay on their focused subpath; types are safe to re-export.
 export type {
   StoryAction,
   StoryBeat,
   StorySequence,
   StorySequenceValidation,
 } from "./story-beat";
-export const boundsSchema = z
-  .object({
-    x: z.number().min(0).max(1000),
-    y: z.number().min(0).max(600),
-    width: z.number().positive().max(1000),
-    height: z.number().positive().max(600),
-  })
-  .strict();
-export const entitySchema = z
-  .object({
-    id: z.string().min(1).max(80),
-    name: z.string().min(1).max(80),
-    kind: z.enum([
-      "character",
-      "castle",
-      "river",
-      "bridge",
-      "cloud",
-      "shelter",
-    ]),
-    bounds: boundsSchema,
-  })
-  .strict();
-export const ruleSchema = z
-  .object({
-    id: z.string().min(1).max(80),
-    subjectId: z.string(),
-    predicate: z.literal("afraid_of"),
-    objectId: z.string(),
-  })
-  .strict();
-export const operationSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("CREATE_ENTITY"), entity: entitySchema }).strict(),
-  z.object({ type: z.literal("REMOVE_ENTITY"), entityId: z.string() }).strict(),
-  z.object({ type: z.literal("ADD_RULE"), rule: ruleSchema }).strict(),
-  z
-    .object({
-      type: z.literal("SET_GOAL"),
-      characterId: z.string(),
-      targetId: z.string(),
-    })
-    .strict(),
-]);
-export const storyMoodSchema = z.enum(["curious", "worried", "delighted"]);
+export {
+  storySequenceRequestSchema,
+  type StorySequenceRequest,
+} from "./story-sequence";
 export const imageBoundsSchema = z
   .object({
     x: z.number().min(0).max(1),

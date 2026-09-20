@@ -1,13 +1,11 @@
 import { z } from "zod";
-import { storyMoodSchema } from "./index";
 import type { EntityKind, WorldState } from "./model";
+import { storyMoodSchema } from "./story-schema";
 
 // Presentation-only language shared by Gemini and the renderer. A beat never
 // mutates the world: it points at entities that a committed WorldState already
 // contains, and the renderer alone decides positions, timing and visuals.
-// Exposed as the `@storyworld/contracts/story-beat` subpath (like `scene`)
-// because it needs `storyMoodSchema` from `./index`, so `./index` may only
-// re-export its types, which are erased and cannot form an import cycle.
+// Exposed as the `@storyworld/contracts/story-beat` subpath (like `scene`).
 
 const entityId = z.string().min(1).max(80);
 
@@ -47,9 +45,10 @@ export const storyBeatSchema = z
   })
   .strict();
 
-// `mode`, `requestId`, `sourceRevision` and `sourceEventId` are attached by
-// the API server, never by the model. A client compares them with its current
-// state to discard a stale sequence.
+// `mode`, `requestId`, `sourceRevision` and `sourceEventId` are constructed by
+// the API server, never by the model. The IDs and revision are echoed from the
+// validated request as correlation/freshness tokens; this API does not
+// authenticate their database provenance.
 export const storySequenceSchema = z
   .object({
     mode: z.enum(["fixture", "live"]),

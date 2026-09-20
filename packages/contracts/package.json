@@ -8,7 +8,9 @@
     "./model": "./src/model.ts",
     "./simulation": "./src/simulation.ts",
     "./scene": "./src/scene.ts",
-    "./story-beat": "./src/story-beat.ts"
+    "./story-beat": "./src/story-beat.ts",
+    "./story-sequence": "./src/story-sequence.ts",
+    "./world-schema": "./src/world-schema.ts"
   },
   "dependencies": {
     "zod": "^4.1.0"
