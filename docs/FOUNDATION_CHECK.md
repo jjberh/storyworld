@@ -3,7 +3,8 @@
 This foundation includes child-led initial authoring, in-place object
 confirmation, and atomic creation of a world from a confirmed scene. Shared
 team ownership and pull request conventions are documented in `AGENTS.md`.
-Living-story animation of the confirmed picture is the next milestone.
+The confirmed picture now plays as a deterministic living paper theater in
+Story Room.
 
 ## Docker
 
@@ -70,9 +71,17 @@ hackathon foundation; rooms separate edits, not confidential data.
   room (`/?mode=…&world=<id>`). That room lists the people currently in it.
   Guests join a live room at `/join?mode=live&world=<id>` and see the same
   picture, events, and people in the room. Fixture join cannot reopen another
-  tab's in-memory world. Animation of the picture is still the next milestone.
+  tab's in-memory world. Confirmed image regions become light-edged paper
+  cutouts over a subdued backdrop. The renderer sequences one to three beats
+  from committed event snapshots only: the opening approaches and stops at a
+  blocking river, while a committed spanning bridge reveals before the
+  character crosses and celebrates. Pending proposals do not animate.
 - The explicit Nova fixture retains drawing capture, uploaded references,
   ambiguous-interpretation choices, and retry without losing the drawing.
 - Fastify `/api/interpret/edit`: live Gemini interpretation when `GEMINI_API_KEY` is set (schema-validated, recoverable errors), deterministic fixture otherwise. `/api/interpret/scene` turns an uploaded picture into a proposed initial scene; STT/TTS endpoints return explicit 501 until implemented.
 
-Audio, sophisticated animation/pathfinding, QR generation, and finished UX are feature work after this checkpoint. Fixture rooms are local and do not synchronize. Rewind restores semantic state as a new revision; it does not replay historical audio or raw strokes.
+Audio, provider-generated story sequences, segmentation, arbitrary pathfinding,
+QR generation, and finished UX are feature work after this checkpoint. Fixture
+rooms are local and do not synchronize. Rewind restores semantic state as a new
+revision and plays one safe bounded paper-stage beat; it does not replay the
+whole visual history, historical audio, or raw strokes.

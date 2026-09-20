@@ -284,6 +284,279 @@ input:focus-visible {
   height: 100%;
   object-fit: contain;
 }
+.room-paper {
+  aspect-ratio: 5 / 3;
+}
+.paper-theater {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  background: #fffaf0;
+}
+.paper-theater-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+.paper-theater-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  filter: saturate(0.72) contrast(0.92);
+  opacity: 0.42;
+}
+.paper-theater-matte,
+.paper-piece {
+  position: absolute;
+}
+.paper-theater-matte {
+  z-index: 1;
+  background: rgba(255, 250, 240, 0.74);
+  border-radius: 6px;
+}
+.paper-piece {
+  z-index: 3;
+  box-sizing: border-box;
+  border: 2px solid rgba(255, 253, 245, 0.92);
+  border-radius: 5px 7px 4px 6px;
+  box-shadow:
+    0 5px 7px rgba(58, 27, 107, 0.2),
+    0 1px 0 rgba(58, 27, 107, 0.2);
+  transition:
+    left 600ms cubic-bezier(0.22, 0.75, 0.2, 1),
+    top 600ms cubic-bezier(0.22, 0.75, 0.2, 1),
+    opacity 240ms ease,
+    scale 240ms ease;
+}
+.paper-piece-crop {
+  background-repeat: no-repeat;
+}
+.paper-piece.is-hidden {
+  opacity: 0;
+  scale: 0.82;
+}
+.paper-piece.is-focus {
+  animation: paper-focus 600ms ease-out;
+}
+.paper-piece.is-reveal {
+  animation: paper-reveal 300ms ease-out;
+}
+.paper-piece.is-blocked_by {
+  animation: paper-wobble 480ms ease-in-out;
+}
+.paper-piece.is-celebrate {
+  animation: paper-celebrate 720ms ease-out;
+}
+.paper-token {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #3a1b6b;
+  background: #f7e6b8;
+}
+.paper-token-label {
+  z-index: 1;
+  max-width: 90%;
+  font-size: clamp(7px, 1.25vw, 13px);
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+}
+.paper-token.bridge {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 12%,
+      rgba(90, 47, 35, 0.42) 12% 15%
+    ),
+    #bd765c;
+  border-color: #f8deb8;
+  border-radius: 4px;
+}
+.paper-token.bridge::before,
+.paper-token.bridge::after {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: #754536;
+  content: "";
+}
+.paper-token.bridge::before {
+  top: 17%;
+}
+.paper-token.bridge::after {
+  bottom: 17%;
+}
+.paper-token.cloud {
+  background: #a7a4b6;
+  border-radius: 48% 52% 43% 57%;
+}
+.paper-token.shelter {
+  background: #f0b36d;
+  clip-path: polygon(50% 0, 100% 42%, 88% 100%, 12% 100%, 0 42%);
+}
+.paper-token.river {
+  background: #89bfcb;
+}
+.paper-token.castle {
+  background: #c5abd8;
+}
+.paper-token.character {
+  background: #f3c75f;
+  border-radius: 46% 54% 48% 52%;
+}
+.paper-rain,
+.paper-confetti {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+}
+.paper-rain i {
+  position: absolute;
+  top: 14%;
+  left: 7%;
+  width: 2px;
+  height: 8%;
+  background: #628ea7;
+  rotate: 8deg;
+  opacity: 0.58;
+}
+.paper-rain i:nth-child(1) {
+  left: 7%;
+}
+.paper-rain i:nth-child(2) {
+  left: 16%;
+}
+.paper-rain i:nth-child(3) {
+  left: 25%;
+}
+.paper-rain i:nth-child(4) {
+  left: 34%;
+}
+.paper-rain i:nth-child(5) {
+  left: 43%;
+}
+.paper-rain i:nth-child(6) {
+  left: 52%;
+}
+.paper-rain i:nth-child(7) {
+  left: 61%;
+}
+.paper-rain i:nth-child(8) {
+  left: 70%;
+}
+.paper-rain i:nth-child(9) {
+  left: 79%;
+}
+.paper-rain i:nth-child(10) {
+  left: 88%;
+}
+.paper-confetti i {
+  position: absolute;
+  top: 42%;
+  left: 50%;
+  width: 7px;
+  height: 11px;
+  background: #ff7a00;
+  animation: paper-confetti 650ms ease-out forwards;
+}
+.paper-confetti i:nth-child(1) {
+  --confetti-x: -42px;
+}
+.paper-confetti i:nth-child(2) {
+  --confetti-x: -28px;
+  background: #6c30a3;
+}
+.paper-confetti i:nth-child(3) {
+  --confetti-x: -14px;
+}
+.paper-confetti i:nth-child(4) {
+  --confetti-x: 0;
+  background: #6c30a3;
+}
+.paper-confetti i:nth-child(5) {
+  --confetti-x: 14px;
+}
+.paper-confetti i:nth-child(6) {
+  --confetti-x: 28px;
+  background: #6c30a3;
+}
+.paper-confetti i:nth-child(7) {
+  --confetti-x: 42px;
+}
+.paper-theater-caption {
+  position: absolute;
+  right: 4%;
+  bottom: 4%;
+  left: 4%;
+  z-index: 6;
+  width: fit-content;
+  max-width: 88%;
+  margin: auto;
+  padding: 7px 12px;
+  color: #3a1b6b;
+  background: rgba(255, 253, 245, 0.92);
+  border: 1px solid rgba(58, 27, 107, 0.24);
+  border-radius: 4px;
+  box-shadow: 0 2px 5px rgba(58, 27, 107, 0.12);
+  font:
+    700 clamp(11px, 1.6vw, 16px) / 1.25 Georgia,
+    serif;
+  text-align: center;
+}
+.paper-theater-fallback,
+.room-picture-fallback {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  margin: 0;
+  padding: 24px;
+  color: #6b5885;
+  text-align: center;
+}
+@keyframes paper-focus {
+  45% {
+    box-shadow:
+      0 6px 9px rgba(58, 27, 107, 0.24),
+      0 0 0 8px rgba(255, 214, 83, 0.46);
+    scale: 1.04;
+  }
+}
+@keyframes paper-reveal {
+  from {
+    opacity: 0;
+    scale: 0.82;
+  }
+}
+@keyframes paper-wobble {
+  25% {
+    translate: -5px 0;
+    rotate: -2deg;
+  }
+  70% {
+    translate: 4px 0;
+    rotate: 2deg;
+  }
+}
+@keyframes paper-celebrate {
+  45% {
+    translate: 0 -15%;
+    rotate: 2deg;
+  }
+}
+@keyframes paper-confetti {
+  to {
+    translate: var(--confetti-x) 85px;
+    rotate: 160deg;
+    opacity: 0;
+  }
+}
 .pixi-layer,
 .drawing-layer,
 .canvas-art {
@@ -353,6 +626,11 @@ input:focus-visible {
 }
 .drawing-layer {
   touch-action: none;
+}
+.drawing-stage:not(.drawing-stage--disabled) canvas {
+  cursor:
+    url("./assets/figma/pencil-cursor.png") 1 47,
+    crosshair;
 }
 .paper-caption {
   display: none;

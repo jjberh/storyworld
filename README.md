@@ -41,7 +41,7 @@ Fixture interpretation can only create a local test world. With live interpretat
 
 After the committed world is observed, the browser holds that world client for the page session and the URL becomes `/?mode=fixture&world=<id>` or `/?mode=live&world=<id>`. That address is the room. Story Room lists the people currently in that world from the shared `participant` rows. A guest opens `/join?mode=live&world=<id>` and subscribes to the same document, revision, events, and people in the room. Fixture `/join` cannot see another tab's in-memory world; use live mode to share.
 
-This milestone ends at a shareable room that shows the confirmed picture and the event log. Living-story playback, meaning animation of the child's picture and later story consequences, is subsequent work and does not exist yet.
+The shareable room turns the confirmed picture into a responsive paper theater. Confirmed object bounds become light-edged paper cutouts over a subdued copy of the drawing; later bridge, cloud, and shelter entities use procedural paper tokens. Playback is derived only from committed event snapshots. The opening focuses the character, moves toward the goal, and stops at a blocking river. A committed bridge reveals before the character crosses and celebrates. Pending proposals and unrelated presence updates do not start playback, and reduced-motion users receive the same narrated semantic states without wobble or confetti.
 
 The former Nova, river, and castle causal demo is retained only as an explicit fixture fallback at `/?mode=fixture&fixture=nova` for fixture demonstrations and automated coverage.
 
@@ -59,13 +59,13 @@ Provider work proposes a `SceneInterpretationResponse`: image-space object candi
 
 ### Story beat contract
 
-Living-story sequences will be described by a strict, presentation-only contract in `@storyworld/contracts/story-beat` (the types are also exported from `@storyworld/contracts`). Only the contract exists so far: no API route, renderer, or fixture generator uses it yet.
+Living-story sequences use the strict, presentation-only contract in `@storyworld/contracts/story-beat` (the types are also exported from `@storyworld/contracts`). Story Room currently builds a bounded deterministic sequence from the latest committed event and its predecessor; a later provider integration may propose sequences through the same validated contract.
 
 - Gemini may propose 1 to 3 **story beats**. Each has an ID, short narration (240 characters at most), a mood, and exactly one action from a fixed set: `focus`, `move_toward`, `blocked_by`, `reveal`, `weather_shift`, or `celebrate`.
 - Beats reference confirmed entities only. `validateStorySequenceForWorld(sequence, world)` rejects any unknown entity ID and any role that does not fit the golden loop: a character moves toward something or is blocked, a river blocks, and a cloud causes weather. It never mutates the sequence or the world.
 - A sequence is tied to a committed revision and event: `requestId`, `sourceRevision`, and `sourceEventId` are attached by the API server, never by the model. A client can discard a sequence whose revision or event is no longer current, that a newer request has replaced, or that mentions an entity that no longer exists.
 - Beats are presentation data and never change the world. They carry no coordinates, durations, easing, CSS, component names, world operations, audio, or video. The renderer decides timing and visuals.
-- Fixture mode will provide deterministic beat sequences. The Gemini endpoint and the renderer are subsequent PRs.
+- Story Room provides deterministic committed-event sequences and a paper-theater renderer without provider keys. A Gemini story endpoint remains subsequent work.
 
 ## Fastest start: Docker
 
