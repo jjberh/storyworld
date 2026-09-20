@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { cloudOperation } from "@storyworld/world-fixtures";
 import type {
   ClientSnapshot,
@@ -9,8 +9,8 @@ import { LiveWorldClient } from "../services/world-client";
 import { peekWorldClient, type RoomMode } from "../services/world-session";
 import paintbrushIcon from "../assets/figma/paintbrush.svg";
 import { PaperTheaterStage } from "../features/world-renderer/PaperTheaterStage";
-import { sequenceFromCommittedEvents } from "../features/world-renderer/committed-story-sequence";
 import { bridgeOperationForWorld } from "./story-room-operations";
+import { useDirectedStorySequence } from "./use-directed-story-sequence";
 
 const emptySnapshot: ClientSnapshot = {
   status: "ready",
@@ -99,17 +99,15 @@ export function StoryRoom({ worldId }: { worldId: string }) {
     }
   }
 
-  const world = snapshot.world;
   const scene = snapshot.scene;
-  const contributor = requestedGuest || (!!world && !snapshot.isDirector);
   const latestEvent = snapshot.events.at(-1);
   const previousEvent = snapshot.events.at(-2);
-  const sequence = useMemo(
-    () =>
-      latestEvent
-        ? sequenceFromCommittedEvents(latestEvent, previousEvent)
-        : null,
-    [latestEvent?.id, previousEvent?.id],
+  const world = latestEvent?.state ?? snapshot.world;
+  const contributor = requestedGuest || (!!world && !snapshot.isDirector);
+  const directedStory = useDirectedStorySequence(
+    latestEvent,
+    previousEvent,
+    scene,
   );
 
   if (session.missingFixture)
@@ -206,7 +204,8 @@ export function StoryRoom({ worldId }: { worldId: string }) {
                 <PaperTheaterStage
                   scene={scene}
                   world={world}
-                  sequence={sequence}
+                  sequence={directedStory.sequence}
+                  keepCommittedRevealsVisible
                 />
               ) : (
                 <div
@@ -218,6 +217,11 @@ export function StoryRoom({ worldId }: { worldId: string }) {
                 </div>
               )}
             </div>
+            {directedStory.status && (
+              <p className="director-status" role="status">
+                {directedStory.status}
+              </p>
+            )}
           </div>
           <aside>
             <div className="room-card">

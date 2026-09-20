@@ -6,7 +6,10 @@ import {
   summarize,
 } from "@storyworld/contracts/simulation";
 import { buildApp } from "./app";
-import { createStoryDirector } from "./services/story-director";
+import {
+  cacheStoryDirector,
+  createStoryDirector,
+} from "./services/story-director";
 
 const API_KEY = "test-gemini-key";
 
@@ -432,7 +435,107 @@ describe("fixture story director", () => {
   });
 });
 
+describe("story director cache", () => {
+  it("does not cache fixture director work", async () => {
+    const direct = vi.fn(async () => [
+      {
+        narration: "Nova waits.",
+        mood: "curious" as const,
+        action: { type: "focus" as const, entityId: "nova" },
+      },
+    ]);
+    const director = cacheStoryDirector({ mode: "fixture", direct });
+    const payload = requestFor(initialWorld("world-1"));
+    await director.direct(payload);
+    await director.direct(payload);
+    expect(direct).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("live Gemini story director", () => {
+  it("single-flights identical events while echoing each caller request ID", async () => {
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = vi.fn(() => pending);
+    const app = liveApp(fetchMock as unknown as typeof fetch);
+    try {
+      const world = initialWorld("world-1");
+      const firstRequest = requestFor(world);
+      const secondRequest = { ...firstRequest, requestId: "story-request-2" };
+      const firstResponse = sequence(app, firstRequest);
+      const secondResponse = sequence(app, secondRequest);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      release(
+        geminiReply({
+          beats: [
+            {
+              narration: "Nova waits by the river.",
+              mood: "worried",
+              action: {
+                type: "blocked_by",
+                entityId: "nova",
+                obstacleId: "river",
+              },
+            },
+          ],
+        }),
+      );
+      const [one, two] = await Promise.all([firstResponse, secondResponse]);
+      expect(one.json().beats).toEqual(two.json().beats);
+      expect(one.json().requestId).toBe("story-request-1");
+      expect(two.json().requestId).toBe("story-request-2");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("uses a new provider call for a changed event fingerprint", async () => {
+    const fetchMock = vi.fn(async () =>
+      geminiReply({
+        beats: [
+          {
+            narration: "Nova waits by the river.",
+            mood: "worried",
+            action: {
+              type: "blocked_by",
+              entityId: "nova",
+              obstacleId: "river",
+            },
+          },
+        ],
+      }),
+    );
+    const app = liveApp(fetchMock as unknown as typeof fetch);
+    try {
+      const world = initialWorld("world-1");
+      await sequence(app, requestFor(world));
+      await sequence(
+        app,
+        requestFor(world, "A different event", {
+          requestId: "story-request-2",
+        }),
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("removes failed provider promises so the event can retry", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 500 }));
+    const app = liveApp(fetchMock as unknown as typeof fetch);
+    try {
+      const world = initialWorld("world-1");
+      expect((await sequence(app, requestFor(world))).statusCode).toBe(502);
+      expect((await sequence(app, requestFor(world))).statusCode).toBe(502);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects an unrelated focus for an addition and accepts its reveal", async () => {
     const previous = initialWorld("world-1");
     const world = applyOperation(previous, {
