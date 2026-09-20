@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
+import type { ConfirmedScene } from "@storyworld/contracts";
 import { cloudOperation, FixtureWorldClient } from "./index";
+
+const scene: ConfirmedScene = {
+  document: {
+    sourceImage: "picture",
+    drawing: { strokes: [], compositeImage: "picture" },
+  },
+  mode: "fixture",
+  objects: [
+    {
+      id: "fox",
+      name: "Fox",
+      kind: "character",
+      confidence: 1,
+      imageBounds: { x: 0.1, y: 0.2, width: 0.2, height: 0.2 },
+    },
+  ],
+  characterId: "fox",
+  openingNarration: "Fox explores.",
+  moodHints: ["curious"],
+};
 
 describe("FixtureWorldClient", () => {
   it("records stable committed events and rewinds semantic state as a new revision", async () => {
@@ -37,5 +58,19 @@ describe("FixtureWorldClient", () => {
       state: { revision: 3, pathStatus: "blocked", weather: "clear" },
     });
     expect(restored.id).not.toBe(cloudEvent.id);
+  });
+
+  it("exposes one local director after initializeScene", async () => {
+    const client = new FixtureWorldClient(true);
+    expect(client.getSnapshot().participants).toEqual([]);
+    await client.initializeScene("story-presence", "request", scene);
+    expect(client.getSnapshot().participants).toEqual([
+      {
+        id: "story-presence:you",
+        identity: "you",
+        role: "director",
+        isYou: true,
+      },
+    ]);
   });
 });

@@ -67,10 +67,10 @@ hackathon foundation; rooms separate edits, not confidential data.
   confirmed scenes are stored in the database. If creation fails, **Try starting
   my story again** resends the same request and **Review my picture again**
   abandons it and unlocks editing. After a successful commit the URL becomes a
-  room (`/?mode=…&world=<id>`). Guests join a live room at
-  `/join?mode=live&world=<id>` and see the same picture and events. Fixture
-  join cannot reopen another tab's in-memory world. Animation of the picture is
-  still the next milestone.
+  room (`/?mode=…&world=<id>`). That room lists the people currently in it.
+  Guests join a live room at `/join?mode=live&world=<id>` and see the same
+  picture, events, and people in the room. Fixture join cannot reopen another
+  tab's in-memory world. Animation of the picture is still the next milestone.
 - The explicit Nova fixture retains drawing capture, uploaded references,
   ambiguous-interpretation choices, and retry without losing the drawing.
 - Fastify `/api/interpret/edit`: live Gemini interpretation when `GEMINI_API_KEY` is set (schema-validated, recoverable errors), deterministic fixture otherwise. `/api/interpret/scene` turns an uploaded picture into a proposed initial scene; STT/TTS endpoints return explicit 501 until implemented.

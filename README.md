@@ -39,7 +39,7 @@ If creation fails, the picture and the child's answers are kept and two actions 
 
 Fixture interpretation can only create a local test world. With live interpretation, `mode=fixture` still uses the local world client; `mode=live` uses the configured database. The source picture, strokes, composite, prompt, confirmed objects and opening narration are retained together. Database document rows are public like the foundation's other tables; do not upload confidential pictures. Local fixture documents last for this page session. Maincloud `storyworld-zhvbk` now has this foundation module; further live schema changes still need a publish from Josh.
 
-After the committed world is observed, the browser holds that world client for the page session and the URL becomes `/?mode=fixture&world=<id>` or `/?mode=live&world=<id>`. That address is the room. A guest opens `/join?mode=live&world=<id>` and subscribes to the same document, revision, and events. Fixture `/join` cannot see another tab's in-memory world; use live mode to share.
+After the committed world is observed, the browser holds that world client for the page session and the URL becomes `/?mode=fixture&world=<id>` or `/?mode=live&world=<id>`. That address is the room. Story Room lists the people currently in that world from the shared `participant` rows. A guest opens `/join?mode=live&world=<id>` and subscribes to the same document, revision, events, and people in the room. Fixture `/join` cannot see another tab's in-memory world; use live mode to share.
 
 This milestone ends at a shareable room that shows the confirmed picture and the event log. Living-story playback, meaning animation of the child's picture and later story consequences, is subsequent work and does not exist yet.
 
@@ -195,7 +195,9 @@ npm run dev -w @storyworld/web
 The default live route still opens the authoring flow. After **Start my story**
 with live interpretation, the URL becomes `/?mode=live&world=story-…`. A second
 browser profile joins that room at `/join?mode=live&world=story-…` and should
-see the same confirmed picture, revision, and story moments.
+see the same confirmed picture, revision, story moments, and people in the
+room. Two live profiles in the same room both show two people after the guest
+joins, without an extra refresh.
 
 The retained Nova collaboration fixture still uses separate browser profiles and
 an explicit test URL such as `?mode=live&world=josh-demo-1&fixture=nova`. The

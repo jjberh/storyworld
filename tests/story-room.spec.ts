@@ -40,6 +40,13 @@ async function startRoom(page: Page) {
   await expect(
     page.getByRole("heading", { name: "Your Story Room" }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "In this room" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("presence-count")).toHaveText("1 person");
+  await expect(page.getByTestId("room-presence")).toContainText(
+    "You · director",
+  );
 }
 
 test("starting a story opens an addressable room with the confirmed picture", async ({

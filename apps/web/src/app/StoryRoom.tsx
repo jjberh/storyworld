@@ -1,6 +1,10 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { bridgeOperation, cloudOperation } from "@storyworld/world-fixtures";
-import type { ClientSnapshot, WorldClient } from "@storyworld/contracts/model";
+import type {
+  ClientSnapshot,
+  RoomParticipant,
+  WorldClient,
+} from "@storyworld/contracts/model";
 import { LiveWorldClient } from "../services/world-client";
 import { peekWorldClient, type RoomMode } from "../services/world-session";
 import paintbrushIcon from "../assets/figma/paintbrush.svg";
@@ -11,8 +15,18 @@ const emptySnapshot: ClientSnapshot = {
   world: null,
   events: [],
   proposals: [],
+  participants: [],
   isDirector: false,
 };
+
+function presenceLabel(participant: RoomParticipant) {
+  if (participant.isYou) return "You · " + participant.role;
+  return participant.role === "director" ? "Director" : "Guest";
+}
+
+function presenceCount(count: number) {
+  return count === 1 ? "1 person" : count + " people";
+}
 
 function ignoreSubscribe() {
   return () => undefined;
@@ -63,16 +77,12 @@ export function StoryRoom({ worldId }: { worldId: string }) {
     if (!client) return;
     void client
       .connect()
-      .then(() =>
-        requestedGuest && mode === "live"
-          ? client.joinWorld(worldId)
-          : undefined,
-      )
+      .then(() => (mode === "live" ? client.joinWorld(worldId) : undefined))
       .catch((reason) => setError(String(reason)));
     return () => {
       if (session.owns) client.dispose();
     };
-  }, [client, mode, requestedGuest, session.owns, worldId]);
+  }, [client, mode, session.owns, worldId]);
 
   async function run(action: () => Promise<void>) {
     setError("");
@@ -213,6 +223,17 @@ export function StoryRoom({ worldId }: { worldId: string }) {
               >
                 Copy guest link
               </button>
+            </div>
+            <div className="presence-card" data-testid="room-presence">
+              <h2>In this room</h2>
+              <strong data-testid="presence-count">
+                {presenceCount(snapshot.participants.length)}
+              </strong>
+              <ul className="presence-list">
+                {snapshot.participants.map((participant) => (
+                  <li key={participant.id}>{presenceLabel(participant)}</li>
+                ))}
+              </ul>
             </div>
             <div className="proposals-card">
               <h2>The World Listens</h2>

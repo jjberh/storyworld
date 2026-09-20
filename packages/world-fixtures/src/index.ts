@@ -1,6 +1,7 @@
 import type {
   WorldClient,
   ClientSnapshot,
+  RoomParticipant,
   WorldOperation,
 } from "@storyworld/contracts/model";
 import {
@@ -38,10 +39,19 @@ export function cloudOperation(): WorldOperation {
     },
   };
 }
+function localDirector(worldId: string): RoomParticipant {
+  return {
+    id: worldId + ":you",
+    identity: "you",
+    role: "director",
+    isYou: true,
+  };
+}
 export class FixtureWorldClient implements WorldClient {
   private initialization?: { id: string; requestId: string; payload: string };
   constructor(empty = false) {
-    if (empty) this.snapshot = { ...this.snapshot, world: null };
+    if (empty)
+      this.snapshot = { ...this.snapshot, world: null, participants: [] };
   }
   async initializeScene(id: string, requestId: string, input: ConfirmedScene) {
     const scene = confirmedSceneSchema.parse(input);
@@ -73,6 +83,7 @@ export class FixtureWorldClient implements WorldClient {
         },
       ],
       proposals: [],
+      participants: [localDirector(id)],
     };
     this.emit();
   }
@@ -83,6 +94,7 @@ export class FixtureWorldClient implements WorldClient {
     world: initialWorld("nova"),
     events: [],
     proposals: [],
+    participants: [localDirector("nova")],
     isDirector: true,
   };
   getSnapshot = () => this.snapshot;
@@ -105,6 +117,7 @@ export class FixtureWorldClient implements WorldClient {
       world: initialWorld(id),
       events: [],
       proposals: [],
+      participants: [localDirector(id)],
       isDirector: true,
     };
     this.emit();
