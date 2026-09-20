@@ -239,15 +239,44 @@ describe("story sequence references against a world", () => {
     ).toEqual(['Beat "b1": obstacleId "sea" is not in this world.']);
   });
 
-  it("accepts a weather shift with no cause or with a real cloud", () => {
-    for (const action of [
-      { type: "weather_shift", weather: "rain" },
-      { type: "weather_shift", weather: "clear" },
-      { type: "weather_shift", weather: "rain", causeEntityId: "cloud" },
-    ] as const)
-      expect(
-        validateStorySequenceForWorld(sequence([beat("b1", action)]), world).ok,
-      ).toBe(true);
+  it("accepts committed weather with no cause or with a real cloud", () => {
+    expect(
+      validateStorySequenceForWorld(
+        sequence([beat("b1", { type: "weather_shift", weather: "clear" })]),
+        world,
+      ).ok,
+    ).toBe(true);
+    expect(
+      validateStorySequenceForWorld(
+        sequence([
+          beat("b1", {
+            type: "weather_shift",
+            weather: "rain",
+            causeEntityId: "cloud",
+          }),
+        ]),
+        { ...world, weather: "rain" },
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("rejects weather that contradicts the committed world", () => {
+    expect(
+      errorsFor(
+        sequence([beat("b1", { type: "weather_shift", weather: "rain" })]),
+      ),
+    ).toEqual([
+      'Beat "b1": weather "rain" does not match this world\'s committed weather "clear".',
+    ]);
+    const result = validateStorySequenceForWorld(
+      sequence([beat("b1", { type: "weather_shift", weather: "clear" })]),
+      { ...world, weather: "rain" },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors).toEqual([
+        'Beat "b1": weather "clear" does not match this world\'s committed weather "rain".',
+      ]);
   });
 
   it("rejects an unknown weather cause and a cause that is not a cloud", () => {
@@ -256,7 +285,7 @@ describe("story sequence references against a world", () => {
         sequence([
           beat("b1", {
             type: "weather_shift",
-            weather: "rain",
+            weather: "clear",
             causeEntityId: "ghost",
           }),
         ]),
@@ -267,7 +296,7 @@ describe("story sequence references against a world", () => {
         sequence([
           beat("b1", {
             type: "weather_shift",
-            weather: "rain",
+            weather: "clear",
             causeEntityId: "castle",
           }),
         ]),

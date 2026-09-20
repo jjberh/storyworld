@@ -82,8 +82,9 @@ export type StorySequenceValidation =
 /**
  * Checks a sequence against one committed world: every referenced entity must
  * exist, and the golden-loop roles must fit (a character moves or is blocked, a
- * river blocks, a cloud causes weather). Accepts unparsed input, never mutates
- * the sequence or the world, and returns a validated copy.
+ * river blocks, a cloud causes weather, and presented weather matches the
+ * committed state). Accepts unparsed input, never mutates the sequence or the
+ * world, and returns a validated copy.
  */
 export function validateStorySequenceForWorld(
   input: unknown,
@@ -134,6 +135,10 @@ export function validateStorySequenceForWorld(
         requireKind("obstacleId", action.obstacleId, "river", "a river");
         break;
       case "weather_shift":
+        if (action.weather !== world.weather)
+          errors.push(
+            `${where}: weather "${action.weather}" does not match this world's committed weather "${world.weather}".`,
+          );
         if (action.causeEntityId)
           requireKind(
             "causeEntityId",
