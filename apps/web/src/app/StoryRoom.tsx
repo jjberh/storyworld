@@ -8,7 +8,7 @@ import type {
 import { LiveWorldClient } from "../services/world-client";
 import { peekWorldClient, type RoomMode } from "../services/world-session";
 import paintbrushIcon from "../assets/figma/paintbrush.svg";
-import { PaperTheaterStage } from "../features/world-renderer/PaperTheaterStage";
+import { StoryStage } from "../features/world-renderer/StoryStage";
 import { bridgeOperationForWorld } from "./story-room-operations";
 import { useDirectedStorySequence } from "./use-directed-story-sequence";
 
@@ -201,7 +201,7 @@ export function StoryRoom({ worldId }: { worldId: string }) {
             </div>
             <div className="paper room-paper">
               {scene ? (
-                <PaperTheaterStage
+                <StoryStage
                   scene={scene}
                   world={world}
                   sequence={directedStory.sequence}
