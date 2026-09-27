@@ -74,6 +74,10 @@ function world(revision: number, entities: Entity[]): WorldState {
     goal: { characterId: "fox", targetId: "castle" },
     pathStatus: entities.includes(bridge) ? "available" : "blocked",
     weather: entities.includes(cloud) ? "rain" : "clear",
+    interaction: null,
+    crossings: entities.includes(bridge)
+      ? [{ obstacleId: "river", helperId: bridge.id }]
+      : [],
   };
 }
 

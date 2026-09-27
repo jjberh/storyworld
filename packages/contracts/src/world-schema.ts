@@ -46,6 +46,44 @@ export const entityPropertiesSchema = z
     "Properties must not repeat.",
   );
 
+/** Most numbers a sketch may hold, so an operation stays under 10 kB. */
+export const MAX_SKETCH_NUMBERS = 1600;
+
+// World coordinates, so a stroke stays inside the 1000x600 page.
+const strokeSchema = z
+  .array(z.number().int().min(0).max(1000))
+  .min(4)
+  .max(MAX_SKETCH_NUMBERS)
+  .refine(
+    (points) =>
+      points.length % 2 === 0 &&
+      points.every((value, index) => index % 2 === 0 || value <= 600),
+    "A stroke is a list of x, y pairs inside the page.",
+  );
+
+export const entitySketchSchema = z
+  .object({ strokes: z.array(strokeSchema).min(1).max(40) })
+  .strict()
+  .refine(
+    ({ strokes }) =>
+      strokes.reduce((total, stroke) => total + stroke.length, 0) <=
+      MAX_SKETCH_NUMBERS,
+    "The sketch has too many points.",
+  );
+
+export const interactionOutcomeSchema = z.enum([
+  "crosses",
+  "flies_over",
+  "rides_across",
+  "launched_across",
+  "almost",
+  "splash",
+  "blocked",
+  "scared",
+  "sheltered",
+  "nothing_happens",
+]);
+
 export const entitySchema = z
   .object({
     id: entityIdSchema,
@@ -54,7 +92,26 @@ export const entitySchema = z
     description: entityDescriptionSchema,
     properties: entityPropertiesSchema,
     bounds: boundsSchema,
+    sketch: entitySketchSchema.optional(),
+    outcome: interactionOutcomeSchema.optional(),
   })
+  .strict();
+
+const probabilitySchema = z.number().min(0).max(1);
+
+export const interactionSchema = z
+  .object({
+    entityId: entityIdSchema,
+    outcome: interactionOutcomeSchema,
+    odds: probabilitySchema,
+    confidence: probabilitySchema,
+    obstacleId: entityIdSchema.nullable(),
+    revision: z.number().int().min(0),
+  })
+  .strict();
+
+export const routeCrossingSchema = z
+  .object({ obstacleId: entityIdSchema, helperId: entityIdSchema })
   .strict();
 
 export const ruleSchema = z
@@ -79,6 +136,16 @@ export const operationSchema = z.discriminatedUnion("type", [
       targetId: entityIdSchema,
     })
     .strict(),
+  z
+    .object({
+      type: z.literal("RESOLVE_INTERACTION"),
+      entityId: entityIdSchema,
+      outcome: interactionOutcomeSchema,
+      odds: probabilitySchema,
+      confidence: probabilitySchema,
+      obstacleId: entityIdSchema.nullable(),
+    })
+    .strict(),
 ]);
 
 export const worldStateSchema = z
@@ -97,6 +164,8 @@ export const worldStateSchema = z
       .nullable(),
     pathStatus: z.enum(["idle", "blocked", "available"]),
     weather: z.enum(["clear", "rain"]),
+    interaction: interactionSchema.nullable(),
+    crossings: z.array(routeCrossingSchema).max(100),
   })
   .strict()
   .superRefine((world, ctx) => {
@@ -128,6 +197,34 @@ export const worldStateSchema = z
           code: "custom",
           path: ["rules", index, "objectId"],
           message: "Rule object must exist in the world.",
+        });
+    });
+    if (world.interaction) {
+      if (!entities.has(world.interaction.entityId))
+        ctx.addIssue({
+          code: "custom",
+          path: ["interaction", "entityId"],
+          message: "The interaction's drawing must exist in the world.",
+        });
+      if (
+        world.interaction.obstacleId &&
+        !entities.has(world.interaction.obstacleId)
+      )
+        ctx.addIssue({
+          code: "custom",
+          path: ["interaction", "obstacleId"],
+          message: "The interaction's obstacle must exist in the world.",
+        });
+    }
+    world.crossings.forEach((crossing, index) => {
+      if (
+        !entities.has(crossing.obstacleId) ||
+        !entities.has(crossing.helperId)
+      )
+        ctx.addIssue({
+          code: "custom",
+          path: ["crossings", index],
+          message: "A crossing must refer to entities in the world.",
         });
     });
     if (world.goal) {

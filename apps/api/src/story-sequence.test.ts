@@ -132,8 +132,8 @@ describe("fixture story director", () => {
     }
   });
 
-  it("reveals a committed route-opening bridge before crossing", async () => {
-    const previous = initialWorld("world-1");
+  it("narrates a committed crossing outcome and celebrates the opened route", async () => {
+    const initial = initialWorld("world-1");
     const operation = {
       type: "CREATE_ENTITY" as const,
       entity: {
@@ -145,20 +145,110 @@ describe("fixture story director", () => {
         bounds: { x: 400, y: 280, width: 160, height: 80 },
       },
     };
-    const world = applyOperation(previous, operation);
+    const added = applyOperation(initial, operation);
+    const resolve = {
+      type: "RESOLVE_INTERACTION" as const,
+      entityId: "bridge-1",
+      outcome: "crosses" as const,
+      odds: 0.9,
+      confidence: 0.8,
+      obstacleId: "river",
+    };
+    const world = applyOperation(added, resolve);
     const app = buildApp();
     try {
+      // Adding the drawing only reveals it: the route waits for the outcome.
+      const reveal = await sequence(
+        app,
+        requestFor(added, summarize(operation, added), {}, initial),
+      );
+      expect(reveal.statusCode).toBe(200);
+      expect(
+        reveal
+          .json()
+          .beats.map((beat: { action: { type: string } }) => beat.action.type),
+      ).toEqual(["reveal"]);
       const response = await sequence(
         app,
-        requestFor(world, summarize(operation, world), {}, previous),
+        requestFor(world, summarize(resolve, world), {}, added),
       );
       expect(response.statusCode).toBe(200);
       expect(
         response
           .json()
           .beats.map((beat: { action: { type: string } }) => beat.action.type),
-      ).toEqual(["reveal", "move_toward", "celebrate"]);
+      ).toEqual(["focus", "move_toward", "celebrate"]);
       expect(response.json().beats[0].action.entityId).toBe("bridge-1");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("narrates each committed outcome with the drawing that acted", async () => {
+    const initial = initialWorld("world-1");
+    const cases = [
+      [
+        "dragon",
+        ["flies", "carries"],
+        "flies_over",
+        ["fly_over", "ride", "celebrate"],
+      ],
+      [
+        "boat",
+        ["floats", "carries"],
+        "rides_across",
+        ["focus", "ride", "celebrate"],
+      ],
+      [
+        "trampoline",
+        ["launches"],
+        "launched_across",
+        ["focus", "launch", "celebrate"],
+      ],
+      ["plank", ["carries"], "almost", ["focus", "blocked_by"]],
+      ["raft", ["floats"], "splash", ["focus", "splash"]],
+      ["rock", [], "blocked", ["focus", "blocked_by"]],
+      ["monster", ["scares"], "scared", ["react"]],
+      ["sun", [], "nothing_happens", ["react"]],
+    ] as const;
+    const app = buildApp();
+    try {
+      for (const [id, properties, outcome, types] of cases) {
+        const added = applyOperation(initial, {
+          type: "CREATE_ENTITY",
+          entity: {
+            id,
+            role: "helper",
+            description: "",
+            properties: [...properties],
+            name: id,
+            bounds: { x: 400, y: 280, width: 160, height: 80 },
+          },
+        });
+        const world = applyOperation(added, {
+          type: "RESOLVE_INTERACTION",
+          entityId: id,
+          outcome,
+          odds: 0.5,
+          confidence: 0.5,
+          obstacleId: "river",
+        });
+        const response = await sequence(
+          app,
+          requestFor(world, "Outcome", {}, added),
+        );
+        expect(response.statusCode, outcome).toBe(200);
+        const actions = response
+          .json()
+          .beats.map((beat: { action: { type: string } }) => beat.action);
+        expect(actions.map((action: { type: string }) => action.type)).toEqual(
+          types,
+        );
+        expect(JSON.stringify(actions)).toContain(`"${id}"`);
+        expect(world.pathStatus).toBe(
+          types.includes("celebrate" as never) ? "available" : "blocked",
+        );
+      }
     } finally {
       await app.close();
     }
@@ -281,9 +371,8 @@ describe("fixture story director", () => {
     }
   });
 
-  it("reveals a new bridge and keeps the route blocked when it misses", async () => {
-    const previous = initialWorld("world-1");
-    const world = applyOperation(previous, {
+  it("keeps the route blocked when a short bridge's outcome is a funny miss", async () => {
+    const previous = applyOperation(initialWorld("world-1"), {
       type: "CREATE_ENTITY",
       entity: {
         id: "bridge-short",
@@ -294,6 +383,15 @@ describe("fixture story director", () => {
         bounds: { x: 450, y: 280, width: 40, height: 80 },
       },
     });
+    const world = applyOperation(previous, {
+      type: "RESOLVE_INTERACTION",
+      entityId: "bridge-short",
+      outcome: "almost",
+      odds: 0.3,
+      confidence: 0.7,
+      obstacleId: "river",
+    });
+    expect(world.pathStatus).toBe("blocked");
     const app = buildApp();
     try {
       const response = await sequence(
@@ -305,7 +403,8 @@ describe("fixture story director", () => {
         response
           .json()
           .beats.map((beat: { action: { type: string } }) => beat.action.type),
-      ).toEqual(["reveal", "blocked_by"]);
+      ).toEqual(["focus", "blocked_by"]);
+      expect(response.json().beats[1].narration).toMatch(/So close!/);
     } finally {
       await app.close();
     }
@@ -479,6 +578,8 @@ describe("fixture story director", () => {
       goal: { characterId, targetId: riverId },
       pathStatus: "blocked" as const,
       weather: "clear" as const,
+      interaction: null,
+      crossings: [],
     };
     const previous: WorldState = {
       ...base,
@@ -664,7 +765,7 @@ describe("live Gemini story director", () => {
 
   it("accepts relevant live bridge-opening and rain sequences", async () => {
     const initial = initialWorld("world-1");
-    const bridged = applyOperation(initial, {
+    const added = applyOperation(initial, {
       type: "CREATE_ENTITY",
       entity: {
         id: "bridge-1",
@@ -674,6 +775,15 @@ describe("live Gemini story director", () => {
         name: "Bridge",
         bounds: { x: 400, y: 280, width: 160, height: 80 },
       },
+    });
+    // The committed crossing outcome is what opens the route.
+    const bridged = applyOperation(added, {
+      type: "RESOLVE_INTERACTION",
+      entityId: "bridge-1",
+      outcome: "crosses",
+      odds: 0.9,
+      confidence: 0.8,
+      obstacleId: "river",
     });
     const bridgeApp = buildApp({
       storyDirector: {
@@ -733,7 +843,7 @@ describe("live Gemini story director", () => {
         (
           await sequence(
             bridgeApp,
-            requestFor(bridged, "Bridge added", {}, initial),
+            requestFor(bridged, "Bridge: a way across", {}, added),
           )
         ).statusCode,
       ).toBe(200);
@@ -749,7 +859,7 @@ describe("live Gemini story director", () => {
 
   it("rejects world-valid beats that miss path or weather transitions", async () => {
     const initial = initialWorld("world-1");
-    const bridged = applyOperation(initial, {
+    const added = applyOperation(initial, {
       type: "CREATE_ENTITY",
       entity: {
         id: "bridge-1",
@@ -759,6 +869,15 @@ describe("live Gemini story director", () => {
         name: "Bridge",
         bounds: { x: 400, y: 280, width: 160, height: 80 },
       },
+    });
+    // The committed crossing outcome is what opens the route.
+    const bridged = applyOperation(added, {
+      type: "RESOLVE_INTERACTION",
+      entityId: "bridge-1",
+      outcome: "crosses",
+      odds: 0.9,
+      confidence: 0.8,
+      obstacleId: "river",
     });
     const bridgeApp = buildApp({
       storyDirector: {
@@ -799,7 +918,7 @@ describe("live Gemini story director", () => {
       for (const response of [
         await sequence(
           bridgeApp,
-          requestFor(bridged, "Bridge added", {}, initial),
+          requestFor(bridged, "Bridge: a way across", {}, added),
         ),
         await sequence(rainApp, requestFor(rainy, "Cloud added", {}, initial)),
       ]) {

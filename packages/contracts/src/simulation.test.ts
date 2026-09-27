@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { initialWorld, applyOperation, summarize } from "./simulation";
 import { initialSceneResponseSchema } from "./index";
-import type { Entity, WorldOperation } from "./model";
+import type { Entity, InteractionOutcome, WorldOperation } from "./model";
+import { operationSchema, worldStateSchema } from "./world-schema";
 const bridge = (x: number, width: number): WorldOperation => ({
   type: "CREATE_ENTITY",
   entity: {
@@ -13,19 +14,215 @@ const bridge = (x: number, width: number): WorldOperation => ({
     bounds: { x, y: 330, width, height: 50 },
   },
 });
+const resolve = (
+  outcome: InteractionOutcome,
+  entityId = "bridge",
+  obstacleId: string | null = "river",
+): WorldOperation => ({
+  type: "RESOLVE_INTERACTION",
+  entityId,
+  outcome,
+  odds: 0.8,
+  confidence: 0.9,
+  obstacleId,
+});
+/** A committed bridge whose interaction was resolved with `outcome`. */
+const bridgedWith = (outcome: InteractionOutcome) =>
+  applyOperation(
+    applyOperation(initialWorld("test"), bridge(400, 160)),
+    resolve(outcome),
+  );
+const create = (
+  entity: Omit<Entity, "description"> & { description?: string },
+): WorldOperation => ({
+  type: "CREATE_ENTITY",
+  entity: { description: "", ...entity },
+});
 describe("world causality", () => {
-  it("opens the route only when a bridge spans both riverbanks", () => {
+  it("opens the route only through a committed success outcome", () => {
     const w = initialWorld("test");
-    expect(applyOperation(w, bridge(420, 119)).pathStatus).toBe("blocked");
-    expect(applyOperation(w, bridge(420, 120)).pathStatus).toBe("available");
+    // Adding a drawing never opens the route by itself, however it is drawn.
+    const added = applyOperation(w, bridge(400, 160));
+    expect(added.pathStatus).toBe("blocked");
+    expect(added.interaction).toBeNull();
+    const crossed = applyOperation(added, resolve("crosses"));
+    expect(crossed.pathStatus).toBe("available");
+    expect(crossed.crossings).toEqual([
+      { obstacleId: "river", helperId: "bridge" },
+    ]);
+    expect(crossed.interaction).toEqual({
+      entityId: "bridge",
+      outcome: "crosses",
+      odds: 0.8,
+      confidence: 0.9,
+      obstacleId: "river",
+      revision: crossed.revision,
+    });
+    expect(worldStateSchema.safeParse(crossed).success).toBe(true);
     expect(w.entities).toHaveLength(3);
   });
-  it("blocks the route after removing its bridge", () => {
-    const w = applyOperation(initialWorld("test"), bridge(400, 160));
+  it("keeps the route blocked after a funny failure", () => {
+    for (const outcome of ["almost", "splash", "blocked", "scared"] as const) {
+      const world = bridgedWith(outcome);
+      expect(world.pathStatus).toBe("blocked");
+      expect(world.crossings).toEqual([]);
+      expect(world.interaction?.outcome).toBe(outcome);
+      expect(world.interaction?.obstacleId).toBe("river");
+    }
+  });
+  it("leaves the route unchanged for neutral outcomes", () => {
+    const withTent = applyOperation(
+      bridgedWith("crosses"),
+      create({
+        id: "tent",
+        name: "Tent",
+        role: "helper",
+        properties: ["shelters"],
+        bounds: { x: 100, y: 100, width: 60, height: 60 },
+      }),
+    );
     expect(
-      applyOperation(w, { type: "REMOVE_ENTITY", entityId: "bridge" })
-        .pathStatus,
+      applyOperation(withTent, resolve("sheltered", "tent")).pathStatus,
+    ).toBe("available");
+    expect(
+      applyOperation(withTent, resolve("nothing_happens", "tent")).pathStatus,
+    ).toBe("available");
+    expect(
+      applyOperation(
+        applyOperation(initialWorld("test"), bridge(400, 160)),
+        resolve("nothing_happens"),
+      ).pathStatus,
     ).toBe("blocked");
+  });
+  it("blocks the route after removing the helper that opened it", () => {
+    const removed = applyOperation(bridgedWith("rides_across"), {
+      type: "REMOVE_ENTITY",
+      entityId: "bridge",
+    });
+    expect(removed.pathStatus).toBe("blocked");
+    expect(removed.crossings).toEqual([]);
+    expect(removed.interaction).toBeNull();
+  });
+  it("rejects outcomes the drawing cannot present", () => {
+    const added = applyOperation(initialWorld("test"), bridge(400, 160));
+    // The bridge carries, but it cannot fly or launch.
+    expect(() => applyOperation(added, resolve("flies_over"))).toThrow("flies");
+    expect(() => applyOperation(added, resolve("launched_across"))).toThrow(
+      "launches",
+    );
+    expect(() => applyOperation(added, resolve("sheltered"))).toThrow(
+      "shelter",
+    );
+    expect(() => applyOperation(added, resolve("crosses", "ghost"))).toThrow(
+      "not in this world",
+    );
+    expect(() => applyOperation(added, resolve("crosses", "nova"))).toThrow(
+      "character",
+    );
+    expect(() =>
+      applyOperation(added, { ...resolve("crosses"), odds: 1.5 } as never),
+    ).toThrow("odds");
+    // Without a goal there is nowhere to cross to, but a reaction still fits.
+    const noGoal = { ...added, goal: null };
+    expect(() => applyOperation(noGoal, resolve("crosses"))).toThrow("goal");
+    expect(
+      applyOperation(noGoal, resolve("scared", "bridge", null)).pathStatus,
+    ).toBe("idle");
+  });
+  it("resolves each drawing only once", () => {
+    const crossed = bridgedWith("crosses");
+    expect(
+      crossed.entities.find((entity) => entity.id === "bridge")?.outcome,
+    ).toBe("crosses");
+    expect(() => applyOperation(crossed, resolve("crosses"))).toThrow(
+      "already happened",
+    );
+    const missed = bridgedWith("almost");
+    expect(() => applyOperation(missed, resolve("crosses"))).toThrow(
+      "already happened",
+    );
+    // A drawing cannot arrive already resolved.
+    expect(() =>
+      applyOperation(initialWorld("test"), {
+        type: "CREATE_ENTITY",
+        entity: {
+          ...(
+            bridge(400, 160) as Extract<
+              WorldOperation,
+              { type: "CREATE_ENTITY" }
+            >
+          ).entity,
+          outcome: "crosses",
+        },
+      }),
+    ).toThrow("outcome");
+    // A rewind to before the outcome lets the drawing be resolved again.
+    const added = applyOperation(initialWorld("test"), bridge(400, 160));
+    expect(
+      applyOperation(
+        { ...added, revision: crossed.revision + 1 },
+        resolve("splash"),
+      ).interaction?.outcome,
+    ).toBe("splash");
+  });
+  it("refuses an outcome judged against an obstacle the route no longer has", () => {
+    const added = applyOperation(initialWorld("test"), bridge(400, 160));
+    // Jev judged the river; meanwhile a wall now closes the route first
+    // (with no fear rule, the obstacle nearest the character is blamed).
+    const walled = applyOperation(
+      { ...added, rules: [] },
+      create({
+        id: "wall",
+        name: "Stone wall",
+        role: "obstacle",
+        properties: ["blocks"],
+        bounds: { x: 300, y: 150, width: 40, height: 400 },
+      }),
+    );
+    expect(() => applyOperation(walled, resolve("crosses"))).toThrow(
+      "world changed",
+    );
+    expect(
+      applyOperation(walled, resolve("crosses", "bridge", "wall")).crossings,
+    ).toEqual([{ obstacleId: "wall", helperId: "bridge" }]);
+    expect(() =>
+      applyOperation(added, resolve("crosses", "bridge", null)),
+    ).toThrow("world changed");
+  });
+  it("offers a funny failure only while something is still in the way", () => {
+    const open = applyOperation(
+      bridgedWith("crosses"),
+      create({
+        id: "plank",
+        name: "Plank",
+        role: "helper",
+        properties: ["carries"],
+        bounds: { x: 420, y: 450, width: 60, height: 30 },
+      }),
+    );
+    expect(open.pathStatus).toBe("available");
+    for (const outcome of ["almost", "splash", "blocked"] as const)
+      expect(() => applyOperation(open, resolve(outcome, "plank"))).toThrow(
+        "in the way",
+      );
+    // Reactions and further successes still fit an open route.
+    expect(applyOperation(open, resolve("scared", "plank")).pathStatus).toBe(
+      "available",
+    );
+  });
+  it("validates the resolve operation's shape", () => {
+    expect(operationSchema.safeParse(resolve("splash")).success).toBe(true);
+    for (const bad of [
+      { ...resolve("splash"), outcome: "explodes" },
+      { ...resolve("splash"), odds: -0.1 },
+      { ...resolve("splash"), confidence: 2 },
+      { ...resolve("splash"), obstacleId: 5 },
+      (({ obstacleId: _, ...rest }) => rest)(
+        resolve("splash") as { obstacleId: unknown },
+      ),
+      { ...resolve("splash"), extra: true },
+    ])
+      expect(operationSchema.safeParse(bad).success).toBe(false);
   });
   it("rejects duplicate IDs and out-of-bounds entities", () => {
     const w = applyOperation(initialWorld("test"), bridge(400, 160));
@@ -58,12 +255,6 @@ describe("world causality", () => {
     expect(world.weather).toBe("rain");
   });
 });
-const create = (
-  entity: Omit<Entity, "description"> & { description?: string },
-): WorldOperation => ({
-  type: "CREATE_ENTITY",
-  entity: { description: "", ...entity },
-});
 const log = (role: Entity["role"], properties: Entity["properties"]) =>
   create({
     id: "log",
@@ -73,22 +264,25 @@ const log = (role: Entity["role"], properties: Entity["properties"]) =>
     bounds: { x: 410, y: 300, width: 140, height: 40 },
   });
 describe("property-based world rules", () => {
-  it("lets any helper that carries span the river, not just a bridge", () => {
+  it("lets any drawing open the route once its outcome is a success", () => {
     const start = initialWorld("test");
+    const raft = applyOperation(start, log("helper", ["carries", "floats"]));
+    expect(raft.pathStatus).toBe("blocked");
     expect(
-      applyOperation(start, log("helper", ["carries", "floats"])).pathStatus,
+      applyOperation(raft, resolve("rides_across", "log")).pathStatus,
     ).toBe("available");
-    // The same geometry without `carries`, or as scenery, does not help.
-    expect(applyOperation(start, log("helper", ["floats"])).pathStatus).toBe(
-      "blocked",
-    );
-    expect(applyOperation(start, log("scenery", ["carries"])).pathStatus).toBe(
-      "blocked",
+    // Scenery without `carries` cannot give a ride, but can still be crossed.
+    const scenery = applyOperation(start, log("scenery", []));
+    expect(() =>
+      applyOperation(scenery, resolve("rides_across", "log")),
+    ).toThrow("carries");
+    expect(applyOperation(scenery, resolve("crosses", "log")).pathStatus).toBe(
+      "available",
     );
   });
 
   it("blocks the route with any obstacle that blocks, not just a river", () => {
-    const bridged = applyOperation(initialWorld("test"), bridge(400, 160));
+    const bridged = bridgedWith("crosses");
     expect(bridged.pathStatus).toBe("available");
     const across = { x: 620, y: 150, width: 40, height: 400 };
     expect(
@@ -131,6 +325,24 @@ describe("property-based world rules", () => {
     ).toBe("available");
   });
 
+  it("opens only the obstacle it crossed when two block the route", () => {
+    const walled = applyOperation(
+      applyOperation(initialWorld("test"), bridge(400, 160)),
+      create({
+        id: "wall",
+        name: "Stone wall",
+        role: "obstacle",
+        properties: ["blocks"],
+        bounds: { x: 620, y: 150, width: 40, height: 400 },
+      }),
+    );
+    const crossed = applyOperation(walled, resolve("crosses"));
+    expect(crossed.crossings).toEqual([
+      { obstacleId: "river", helperId: "bridge" },
+    ]);
+    expect(crossed.pathStatus).toBe("blocked");
+  });
+
   it("rains for anything with weather and stays clear otherwise", () => {
     const sun = applyOperation(
       initialWorld("test"),
@@ -157,40 +369,20 @@ describe("property-based world rules", () => {
     ).toBe("rain");
   });
 
-  it("names the actual blocker in a helper's summary, only with a goal", () => {
-    const start = initialWorld("test");
-    const nearMiss = applyOperation(start, bridge(420, 119));
-    expect(summarize(bridge(420, 119), nearMiss)).toBe(
-      "Bridge added · River still blocks the route",
+  it("summarizes additions plainly and outcomes with their route change", () => {
+    const added = applyOperation(initialWorld("test"), bridge(420, 119));
+    expect(summarize(bridge(420, 119), added)).toBe("Bridge added");
+    const crossed = applyOperation(added, resolve("crosses"));
+    expect(summarize(resolve("crosses"), crossed)).toBe(
+      "Bridge: a way across · route opened",
     );
-    const opened = applyOperation(start, bridge(400, 160));
-    expect(summarize(bridge(400, 160), opened)).toBe(
-      "Bridge added · route opened",
+    const splashed = applyOperation(added, resolve("splash"));
+    expect(summarize(resolve("splash"), splashed)).toBe("Bridge: splash!");
+    const noGoal = { ...added, goal: null };
+    const scared = resolve("scared", "bridge", null);
+    expect(summarize(scared, applyOperation(noGoal, scared))).toBe(
+      "Bridge: a big scare",
     );
-    const walled = applyOperation(
-      applyOperation(start, bridge(400, 160)),
-      create({
-        id: "wall",
-        name: "Stone wall",
-        role: "obstacle",
-        properties: ["blocks"],
-        bounds: { x: 620, y: 150, width: 40, height: 400 },
-      }),
-    );
-    const log = create({
-      id: "log",
-      name: "Log",
-      role: "helper",
-      properties: ["carries"],
-      bounds: { x: 20, y: 20, width: 60, height: 30 },
-    });
-    expect(summarize(log, applyOperation(walled, log))).toBe(
-      "Log added · Stone wall still blocks the route",
-    );
-    const noGoal = { ...start, goal: null };
-    expect(
-      summarize(bridge(420, 119), applyOperation(noGoal, bridge(420, 119))),
-    ).toBe("Bridge added");
   });
 
   it("only sets a goal for a character", () => {
@@ -206,12 +398,24 @@ describe("property-based world rules", () => {
 describe("initial scene contract", () => {
   it("preserves ordered operations and validates character mood hints", () => {
     const response = initialSceneResponseSchema.parse({
-      operations: [bridge(420, 120)],
+      operations: [bridge(420, 120), bridge(420, 120)],
       openingNarration: "Nova needs a way across the river.",
       character: { id: "nova", name: "Nova" },
       moodHints: ["worried", "curious"],
     });
+    expect(response.operations).toHaveLength(2);
     expect(response.operations[0]).toMatchObject({ type: "CREATE_ENTITY" });
     expect(response.character.id).toBe("nova");
+  });
+
+  it("refuses an interaction outcome proposed by the scene model", () => {
+    expect(
+      initialSceneResponseSchema.safeParse({
+        operations: [bridge(420, 120), resolve("crosses")],
+        openingNarration: "Nova needs a way across the river.",
+        character: { id: "nova", name: "Nova" },
+        moodHints: ["worried"],
+      }).success,
+    ).toBe(false);
   });
 });

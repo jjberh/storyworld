@@ -52,6 +52,8 @@ function world(overrides: Partial<WorldState> = {}): WorldState {
     goal: { characterId: "fox", targetId: "castle" },
     pathStatus: "blocked",
     weather: "clear",
+    interaction: null,
+    crossings: [],
     ...overrides,
   };
 }

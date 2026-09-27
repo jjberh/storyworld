@@ -6,6 +6,7 @@ import {
   type StorySequence,
 } from "@storyworld/contracts/story-beat";
 import type { StorySequenceRequest } from "@storyworld/contracts/story-sequence";
+import { withoutSketches } from "@storyworld/contracts/interaction";
 import { sequenceFromCommittedEvents } from "../features/world-renderer/committed-story-sequence";
 import {
   requestStorySequence,
@@ -70,8 +71,9 @@ export class DirectedStoryController {
         revision: latest.revision,
         summary: latest.summary,
       },
-      committedWorld: latest.state,
-      previousCommittedWorld: previous?.state ?? null,
+      // The director needs structure, not the child's stroke data.
+      committedWorld: withoutSketches(latest.state),
+      previousCommittedWorld: previous ? withoutSketches(previous.state) : null,
       childDescription: optionalGuidance(scene.document.description),
       openingNarration: optionalGuidance(scene.openingNarration),
     };

@@ -39,8 +39,7 @@ const matches = (
   );
 
 const start = initialWorld("world-1");
-// A boat that spans the river: carries Nova across and opens the route.
-const withBoat = applyOperation(start, {
+const boatAdded = applyOperation(start, {
   type: "CREATE_ENTITY",
   entity: {
     id: "boat",
@@ -50,6 +49,15 @@ const withBoat = applyOperation(start, {
     properties: ["floats", "carries"],
     bounds: { x: 400, y: 300, width: 160, height: 60 },
   },
+});
+// A boat whose committed outcome carries Nova across and opens the route.
+const withBoat = applyOperation(boatAdded, {
+  type: "RESOLVE_INTERACTION",
+  entityId: "boat",
+  outcome: "rides_across",
+  odds: 0.8,
+  confidence: 0.9,
+  obstacleId: "river",
 });
 // A dragon that flies but does not change the route.
 const withDragon = applyOperation(start, {
@@ -136,6 +144,92 @@ describe("story relevance for the richer actions", () => {
         start,
       ),
     ).toBe(false);
+  });
+
+  it("requires a freshly resolved interaction to show its drawing or character", () => {
+    // The resolve event itself: nothing new was added, but the outcome is.
+    expect(
+      matches(
+        [
+          { type: "focus", entityId: "boat" },
+          { type: "move_toward", entityId: "nova", targetId: "castle" },
+        ],
+        withBoat,
+        boatAdded,
+      ),
+    ).toBe(true);
+    // Crossing is naturally the character's own move to the goal.
+    expect(
+      matches(
+        [{ type: "move_toward", entityId: "nova", targetId: "castle" }],
+        withBoat,
+        boatAdded,
+      ),
+    ).toBe(true);
+    const ignored = applyOperation(boatAdded, {
+      type: "RESOLVE_INTERACTION",
+      entityId: "boat",
+      outcome: "nothing_happens",
+      odds: 0.1,
+      confidence: 0.9,
+      obstacleId: "river",
+    });
+    expect(
+      matches([{ type: "focus", entityId: "castle" }], ignored, boatAdded),
+    ).toBe(false);
+    expect(
+      matches(
+        [
+          {
+            type: "react",
+            entityId: "nova",
+            causeId: "boat",
+            reaction: "surprised",
+          },
+        ],
+        ignored,
+        boatAdded,
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a launch to the goal as the journey when the route opens", () => {
+    const trampoline = applyOperation(
+      applyOperation(start, {
+        type: "CREATE_ENTITY",
+        entity: {
+          id: "trampoline",
+          role: "helper",
+          name: "Trampoline",
+          description: "",
+          properties: ["launches"],
+          bounds: { x: 300, y: 330, width: 80, height: 40 },
+        },
+      }),
+      {
+        type: "RESOLVE_INTERACTION",
+        entityId: "trampoline",
+        outcome: "launched_across",
+        odds: 0.7,
+        confidence: 0.8,
+        obstacleId: "river",
+      },
+    );
+    expect(trampoline.pathStatus).toBe("available");
+    expect(
+      matches(
+        [
+          {
+            type: "launch",
+            entityId: "nova",
+            launcherId: "trampoline",
+            targetId: "castle",
+          },
+        ],
+        trampoline,
+        start,
+      ),
+    ).toBe(true);
   });
 
   it("only accepts the blocker on the route when several things block", () => {

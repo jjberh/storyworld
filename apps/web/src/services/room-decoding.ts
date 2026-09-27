@@ -33,6 +33,26 @@ export type DecodedRoom =
     }
   | { ok: false; error: string };
 
+/**
+ * Decoded snapshots by event ID. An event's snapshot never changes once
+ * committed, and every subscription update re-decodes the whole room, so
+ * each snapshot (sketches included) is parsed and validated once. The text
+ * is kept to check the ID still names the same snapshot.
+ */
+const decodedSnapshots = new Map<string, { text: string; state: WorldState }>();
+const MAX_CACHED_SNAPSHOTS = 500;
+
+function decodeSnapshot(id: string, text: string): WorldState | undefined {
+  const cached = decodedSnapshots.get(id);
+  if (cached?.text === text) return cached.state;
+  const parsed = worldStateSchema.safeParse(parseJson(text));
+  if (!parsed.success) return undefined;
+  if (decodedSnapshots.size >= MAX_CACHED_SNAPSHOTS)
+    decodedSnapshots.delete(decodedSnapshots.keys().next().value!);
+  decodedSnapshots.set(id, { text, state: parsed.data });
+  return parsed.data;
+}
+
 function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
@@ -60,14 +80,14 @@ export function decodeRoom(rows: {
   for (const event of [...rows.events].sort(
     (a, b) => a.revision - b.revision,
   )) {
-    const state = worldStateSchema.safeParse(parseJson(event.snapshot));
-    if (!state.success) return { ok: false, error: OLD_ROOM_MESSAGE };
+    const state = decodeSnapshot(event.id, event.snapshot);
+    if (!state) return { ok: false, error: OLD_ROOM_MESSAGE };
     events.push({
       id: event.id,
       revision: event.revision,
       actor: event.actor,
       summary: event.summary,
-      state: state.data,
+      state,
     });
   }
   let scene: ConfirmedScene | undefined;

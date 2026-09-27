@@ -225,6 +225,8 @@ function world(entities: Entity[] = [fox, river, castle]): WorldState {
     goal: { characterId: "fox", targetId: "castle" },
     pathStatus: "blocked",
     weather: "clear",
+    interaction: null,
+    crossings: [],
   };
 }
 
@@ -665,5 +667,112 @@ describe("StoryStageRenderer recording features", () => {
     expect(layers()[6]!.children).toHaveLength(0);
     expect(layers()[5]!.children).toHaveLength(2);
     recorded.destroy();
+  });
+});
+
+describe("StoryStageRenderer mid-story drawings", () => {
+  async function run(milliseconds: number) {
+    const app = pixi.state.apps.at(-1)!;
+    for (let elapsed = 0; elapsed < milliseconds; elapsed += 16) {
+      app.tick(16);
+      await flush();
+    }
+  }
+
+  it("cuts a piece drawn mid-story from the child's own strokes", async () => {
+    const boat: Entity = {
+      id: "boat",
+      role: "helper",
+      description: "",
+      properties: ["floats", "carries"],
+      name: "Boat",
+      bounds: { x: 420, y: 300, width: 160, height: 60 },
+      sketch: { strokes: [[425, 330, 500, 355, 575, 330]] },
+    };
+    const token: Entity = { ...boat, id: "raft", sketch: undefined };
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world([fox, river, castle, boat, token]),
+    });
+    await stage.ready;
+    const children = (id: string) =>
+      (
+        stage.entityObject(id)!.children as { constructor: { name: string } }[]
+      ).map((child) => child.constructor.name);
+    // Glow, shadow, paper edge and the strokes: no generated label.
+    expect(children("boat")).toEqual([
+      "FakeGraphics",
+      "FakeGraphics",
+      "FakeGraphics",
+      "FakeGraphics",
+    ]);
+    expect(children("raft")).toContain("FakeText");
+    stage.destroy();
+  });
+
+  it("lets the beat on stage finish before a new sequence plays", async () => {
+    const stage = new StoryStageRenderer({ scene, world: world() });
+    await stage.ready;
+    void stage.playSequence(sequence, new AbortController().signal);
+    await run(200);
+    expect(stage.getSnapshot().caption).toBe("Fox sets off.");
+    const captions = new Set<string>();
+    stage.subscribe(() => captions.add(stage.getSnapshot().caption));
+    void stage.playSequence(
+      {
+        ...sequence,
+        sourceEventId: "event-2",
+        beats: [
+          {
+            id: "beat-1",
+            narration: "A new drawing arrives.",
+            mood: "curious",
+            action: { type: "focus", entityId: "castle" },
+          },
+        ],
+      },
+      new AbortController().signal,
+    );
+    await run(200);
+    // Still the first beat: it is never cut mid-way.
+    expect(stage.getSnapshot().caption).toBe("Fox sets off.");
+    await run(600);
+    expect(stage.getSnapshot().caption).toBe("A new drawing arrives.");
+    // The stale sequence's remaining beat never played.
+    expect(captions.has("River stops the way.")).toBe(false);
+    stage.destroy();
+  });
+
+  it("plays only the newest of several sequences that arrive mid-beat", async () => {
+    const stage = new StoryStageRenderer({ scene, world: world() });
+    await stage.ready;
+    void stage.playSequence(sequence, new AbortController().signal);
+    await run(100);
+    const next = (id: string, narration: string): StorySequence => ({
+      ...sequence,
+      sourceEventId: id,
+      beats: [
+        {
+          id: "beat-1",
+          narration,
+          mood: "curious",
+          action: { type: "focus", entityId: "fox" },
+        },
+      ],
+    });
+    const captions = new Set<string>();
+    stage.subscribe(() => captions.add(stage.getSnapshot().caption));
+    void stage.playSequence(
+      next("event-2", "Older moment."),
+      new AbortController().signal,
+    );
+    void stage.playSequence(
+      next("event-3", "Newest moment."),
+      new AbortController().signal,
+    );
+    await run(900);
+    expect(stage.getSnapshot().caption).toBe("Newest moment.");
+    expect(captions.has("Older moment.")).toBe(false);
+    stage.destroy();
   });
 });

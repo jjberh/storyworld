@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import type { InterpretationInput } from "@storyworld/contracts";
+import { mockJev } from "./story-mocks";
 
 async function drawBridge(page: Page) {
   const canvas = page.locator(".drawing-layer canvas").last();
@@ -81,6 +82,7 @@ test("a timeout preserves the drawing and retries its image with updated narrati
   page,
 }) => {
   const inputs: InterpretationInput[] = [];
+  await mockJev(page, "crosses");
   await page.route("**/api/interpret/edit", async (route) => {
     inputs.push(route.request().postDataJSON());
     await route.fulfill(
@@ -127,6 +129,7 @@ test("a timeout preserves the drawing and retries its image with updated narrati
 test("uncertain interpretations wait for confirmation before changing the world", async ({
   page,
 }) => {
+  await mockJev(page, "crosses");
   await page.route("**/api/interpret/edit", (route) =>
     route.fulfill({
       json: {

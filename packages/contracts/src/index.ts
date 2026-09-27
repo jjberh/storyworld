@@ -7,6 +7,9 @@ export * from "./entity-traits";
 export { storyMoodSchema };
 export {
   entityIdSchema,
+  entitySketchSchema,
+  interactionOutcomeSchema,
+  MAX_SKETCH_NUMBERS,
   entityPropertySchema,
   entityRoleSchema,
   ruleSchema,
@@ -20,6 +23,12 @@ export type {
   StorySequence,
   StorySequenceValidation,
 } from "./story-beat";
+export {
+  interactionRequestSchema,
+  interactionResponseSchema,
+  type InteractionRequest,
+  type InteractionResponse,
+} from "./interaction";
 export {
   storySequenceRequestSchema,
   type StorySequenceRequest,
@@ -88,9 +97,17 @@ export const sceneInterpretationResponseSchema = z
         message: "Goal reference must identify a goal candidate",
       });
   });
+/**
+ * An operation a model may propose. Models never decide what a drawing does:
+ * interaction outcomes come only from Jev through the director's client.
+ */
+const modelOperationSchema = operationSchema.refine(
+  (operation) => operation.type !== "RESOLVE_INTERACTION",
+  "A model cannot decide an interaction outcome.",
+);
 export const initialSceneResponseSchema = z
   .object({
-    operations: z.array(operationSchema).max(20),
+    operations: z.array(modelOperationSchema).max(20),
     openingNarration: z.string().min(1).max(2_000),
     character: z
       .object({
@@ -114,7 +131,7 @@ export const interpretationOutput = z.object({
   mode: z.enum(["fixture", "live"]),
   candidates: z.array(
     z.object({
-      operation: operationSchema,
+      operation: modelOperationSchema,
       confidence: z.number().min(0).max(1),
     }),
   ),

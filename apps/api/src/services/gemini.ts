@@ -83,6 +83,7 @@ const systemInstruction = [
   "Decide what the child just added to their story world and what it can do.",
   roleAndPropertyGuide,
   "The world already has its hero and goal, so choose obstacle, helper or scenery for the new object.",
+  "When the picture shows a faded scene with strong lines on top, only the strong lines are the new object; the faded scene is the world it was drawn into.",
   "toolHint is the drawing tool the child picked (bridge, cloud or shelter). It is only a hint; trust the drawing.",
   "Return one to three candidates, most likely first, with confidence between 0 and 1.",
   "Return an empty candidate list when nothing recognizable was added.",

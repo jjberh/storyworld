@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { mockJev } from "./story-mocks";
 test("live director and contributor synchronize an approved bridge", async ({
   browser,
 }) => {
@@ -23,7 +24,18 @@ test("live director and contributor synchronize an approved bridge", async ({
         "This room belongs to another director. Propose a change instead.",
       ),
     ).toBeVisible();
-    await b.getByRole("button", { name: "Propose sample bridge" }).click();
+    // The guest draws a bridge (read by the fixture interpreter); accepting
+    // it asks Jev, stood in for here, what happens.
+    await mockJev(a, "crosses");
+    const canvas = b.locator(".drawing-layer canvas").last();
+    await canvas.scrollIntoViewIfNeeded();
+    const box = (await canvas.boundingBox())!;
+    await b.mouse.move(box.x + box.width * 0.38, box.y + box.height * 0.56);
+    await b.mouse.down();
+    await b.mouse.move(box.x + box.width * 0.59, box.y + box.height * 0.59, {
+      steps: 12,
+    });
+    await b.mouse.up();
     await expect(a.getByText("New guest contribution")).toBeVisible();
     await a.getByRole("button", { name: "Accept", exact: true }).click();
     await expect(
