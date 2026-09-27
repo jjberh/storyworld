@@ -354,6 +354,36 @@ input:focus-visible {
   text-align: center;
   pointer-events: none;
 }
+.paper-pieces-fallback {
+  position: absolute;
+  top: 14%;
+  right: 4%;
+  left: 4%;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.paper-pieces-fallback button {
+  min-height: 44px;
+  padding: 6px 14px;
+  border: 2px solid #3a1b6b;
+  border-radius: 999px;
+  background: #fffdf5;
+  color: #3a1b6b;
+  font-weight: 800;
+}
+.paper-pieces-fallback button:focus-visible {
+  outline: 3px solid #ffb000;
+  outline-offset: 2px;
+}
+.paper-pieces-fallback button:disabled {
+  opacity: 0.5;
+}
 .pixi-layer,
 .drawing-layer,
 .canvas-art {
