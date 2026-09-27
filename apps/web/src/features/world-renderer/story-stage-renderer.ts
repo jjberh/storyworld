@@ -52,6 +52,7 @@ import {
   type ReactionKind,
   type ReactionState,
 } from "./touch-reactions";
+import { entityLook, paintLayerFor, type EntityLook } from "./entity-look";
 
 // The Story Room "paper theater" drawn on one Pixi canvas. Framework-agnostic:
 // it owns its Application, advances every animation from its own ticker clock,
@@ -66,7 +67,7 @@ export type StageImageStatus = "loading" | "loaded" | "failed";
 export type StageEntitySnapshot = {
   id: string;
   name: string;
-  kind: Entity["kind"];
+  role: Entity["role"];
   revealState: "hidden" | "visible";
   placement: Placement;
   logicalX: number;
@@ -151,22 +152,15 @@ const REVEAL_FADE_MS = 240;
 const TITLE_FADE_MS = 450;
 const CAPTION_FONT = "Georgia, 'Times New Roman', serif";
 
-const tokenColors: Record<Entity["kind"], number> = {
-  bridge: 0xbd765c,
+const tokenColors: Record<EntityLook, number> = {
+  span: 0xbd765c,
   cloud: 0xa7a4b6,
   shelter: 0xf0b36d,
-  river: 0x89bfcb,
-  castle: 0xc5abd8,
+  water: 0x89bfcb,
+  barrier: 0xb7a99a,
+  goal: 0xc5abd8,
   character: 0xf3c75f,
-};
-
-const paintLayer: Record<Entity["kind"], number> = {
-  river: 0,
-  bridge: 1,
-  castle: 2,
-  shelter: 2,
-  character: 3,
-  cloud: 4,
+  thing: 0xe9c9a8,
 };
 
 type EntityView = {
@@ -197,7 +191,7 @@ function prefersReducedMotion() {
 /** Shape outline used for a token (and its paper edge and shadow). */
 function tokenShape(
   graphics: Graphics,
-  kind: Entity["kind"],
+  look: EntityLook,
   width: number,
   height: number,
   inflate: number,
@@ -207,7 +201,7 @@ function tokenShape(
   const h = height + inflate * 2;
   const x = -w / 2;
   const y = -h / 2 + dy;
-  switch (kind) {
+  switch (look) {
     case "cloud":
       return graphics.ellipse(0, dy, w / 2, h / 2);
     case "character":
@@ -442,7 +436,7 @@ export class StoryStageRenderer {
   ): Promise<void> {
     if (this.destroyed || signal.aborted) return;
     const ordered = [...this.world.entities].sort(
-      (a, b) => paintLayer[a.kind] - paintLayer[b.kind],
+      (a, b) => paintLayerFor(a) - paintLayerFor(b),
     );
     this.introOrder = new Map(
       ordered.map((entity, index) => [entity.id, index]),
@@ -516,7 +510,7 @@ export class StoryStageRenderer {
     if (!entity || this.pendingReveal() === entityId) return undefined;
     const { state, started } = tapReaction(
       this.reactionState(entityId),
-      entity.kind,
+      entity,
       view?.seed ?? seedFor(entityId),
       this.clockMs,
       this.reducedMotion,
@@ -813,7 +807,7 @@ export class StoryStageRenderer {
         return {
           id: entity.id,
           name: entity.name,
-          kind: entity.kind,
+          role: entity.role,
           revealState: pending === entity.id ? "hidden" : "visible",
           placement: this.placements.get(entity.id) ?? "source",
           logicalX: logicalX(entity, offset),
@@ -897,9 +891,10 @@ export class StoryStageRenderer {
     const { entity, container } = view;
     const { width, height } = entity.bounds;
     const crop = this.hasCrop(entity);
+    const look = entityLook(entity);
     const drawnAs = [
       crop ? `crop:${this.imageStatus}` : "token",
-      entity.kind,
+      look,
       entity.name,
       width,
       height,
@@ -914,7 +909,7 @@ export class StoryStageRenderer {
     view.glow.alpha = 0;
     container.addChild(view.glow);
 
-    const shape = crop ? "castle" : entity.kind;
+    const shape: EntityLook = crop ? "thing" : look;
     const shadow = new Graphics();
     tokenShape(shadow, shape, width, height, 2, 6).fill({
       color: INK,
@@ -930,7 +925,7 @@ export class StoryStageRenderer {
     });
     const edge = new Graphics();
     tokenShape(edge, shape, width, height, 3).fill(
-      entity.kind === "bridge" && !crop ? 0xf8deb8 : PAPER_EDGE,
+      look === "span" && !crop ? 0xf8deb8 : PAPER_EDGE,
     );
     container.addChild(shadow, edge);
 
@@ -949,10 +944,8 @@ export class StoryStageRenderer {
     if (crop) return; // Still loading: a blank paper piece for now.
 
     const body = new Graphics();
-    tokenShape(body, entity.kind, width, height, 0).fill(
-      tokenColors[entity.kind],
-    );
-    if (entity.kind === "bridge") {
+    tokenShape(body, look, width, height, 0).fill(tokenColors[look]);
+    if (look === "span") {
       for (let plank = 0.12; plank < 1; plank += 0.15)
         body
           .rect(-width / 2 + width * plank, -height / 2, width * 0.03, height)
@@ -1025,7 +1018,7 @@ export class StoryStageRenderer {
     // Scenery below, travellers above; world order within each layer.
     this.entityLayer.removeChildren();
     const ordered = [...this.world.entities].sort(
-      (a, b) => paintLayer[a.kind] - paintLayer[b.kind],
+      (a, b) => paintLayerFor(a) - paintLayerFor(b),
     );
     for (const entity of ordered) {
       const view = this.views.get(entity.id);

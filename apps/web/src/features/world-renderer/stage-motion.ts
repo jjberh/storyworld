@@ -1,4 +1,5 @@
 import type { Entity } from "@storyworld/contracts/model";
+import { has, isBlocker, makesRain } from "@storyworld/contracts/entity-traits";
 import type { StoryAction } from "@storyworld/contracts/story-beat";
 import type { Offset } from "./story-playback";
 
@@ -23,27 +24,43 @@ export const RESTING_POSE: Pose = {
   rotation: 0,
 };
 
-export type IdleMotion = "hop" | "drift" | "shimmer" | "breathe";
+export type IdleMotion =
+  | "hop"
+  | "glide"
+  | "sway"
+  | "roll"
+  | "spring"
+  | "drift"
+  | "shimmer"
+  | "breathe";
 
 /**
- * The idle loop a piece plays between beats. Chosen from its kind for now;
- * later this reads entity properties (flies, swims, moves, weather...).
+ * The idle loop a piece plays between beats, chosen from what it can do:
+ * characters stay lively (a hop, or a glide if they fly); weather drifts;
+ * flyers glide with a flap; swimmers and floaters sway on a wave line;
+ * launchers squash then spring; movers roll; blockers shimmer; anything else
+ * breathes with a slight wobble.
  */
-export function idleMotionFor(entity: Pick<Entity, "kind">): IdleMotion {
-  switch (entity.kind) {
-    case "character":
-      return "hop";
-    case "cloud":
-      return "drift";
-    case "river":
-      return "shimmer";
-    default:
-      return "breathe";
-  }
+export function idleMotionFor(
+  entity: Pick<Entity, "role" | "properties">,
+): IdleMotion {
+  if (entity.role === "character")
+    return has(entity, "flies") ? "glide" : "hop";
+  if (makesRain(entity)) return "drift";
+  if (has(entity, "flies")) return "glide";
+  if (has(entity, "swims") || has(entity, "floats")) return "sway";
+  if (has(entity, "launches")) return "spring";
+  if (has(entity, "moves")) return "roll";
+  if (isBlocker(entity)) return "shimmer";
+  return "breathe";
 }
 
 const periods: Record<IdleMotion, number> = {
   hop: 1200,
+  glide: 1800,
+  sway: 1600,
+  roll: 1400,
+  spring: 1500,
   drift: 2000,
   shimmer: 1600,
   breathe: 2000,
@@ -103,6 +120,56 @@ export function sampleMotion(
         rotation: 0.02 * wave,
       };
     }
+    case "glide": {
+      // A slow bob and sideways glide with four quick flap-like squashes.
+      const flap = Math.sin(4 * TAU * phase) ** 2;
+      return {
+        dx: 5 * wave,
+        dy: -5 * Math.sin(TAU * phase + Math.PI / 2),
+        scaleX: 1 + 0.02 * flap,
+        scaleY: 1 - 0.035 * flap,
+        rotation: 0.02 * Math.cos(TAU * phase),
+      };
+    }
+    case "sway":
+      // Side to side, bobbing twice per loop as if on a wave line.
+      return {
+        dx: 5 * wave,
+        dy: 2.5 * Math.sin(2 * TAU * phase),
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0.025 * Math.cos(TAU * phase),
+      };
+    case "roll":
+      // Rolls a little forward and back, leaning into the motion.
+      return {
+        dx: 6 * wave,
+        dy: -1.5 * Math.sin(2 * TAU * phase) ** 2,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0.02 * wave,
+      };
+    case "spring": {
+      // Squash down for the first half, then spring up and settle.
+      if (phase < 0.5) {
+        const squash = Math.sin(2 * Math.PI * phase) ** 2;
+        return {
+          dx: 0,
+          dy: 0,
+          scaleX: 1 + 0.03 * squash,
+          scaleY: 1 - 0.045 * squash,
+          rotation: 0,
+        };
+      }
+      const lift = Math.sin(2 * Math.PI * (phase - 0.5)) ** 2;
+      return {
+        dx: 0,
+        dy: -7 * lift,
+        scaleX: 1 - 0.02 * lift,
+        scaleY: 1 + 0.035 * lift,
+        rotation: 0.01 * wave,
+      };
+    }
     case "drift":
       return {
         dx: 7 * wave,
@@ -156,6 +223,11 @@ const pulseDurations: Partial<Record<StoryAction["type"], number>> = {
   reveal: 300,
   blocked_by: 480,
   celebrate: 720,
+  fly_over: 760,
+  ride: 600,
+  launch: 640,
+  splash: 620,
+  react: 520,
 };
 
 /** How long the one-shot flourish for a beat type lasts, in milliseconds. */
@@ -165,7 +237,8 @@ export function beatPulseDurationMs(type: StoryAction["type"]) {
 
 /**
  * The one-shot flourish the active piece plays when a beat starts: a focus
- * glow, a reveal pop, a blocked wobble or a celebration jump. `height` is the
+ * glow, a reveal pop, a blocked wobble, a celebration jump, a flyover lift, a
+ * ride bounce, a launch squash-and-spring, a splash dip or a startled pop. `height` is the
  * piece height in world units. Returns the resting pulse once it has ended.
  */
 export function beatPulse(
@@ -230,6 +303,105 @@ export function beatPulse(
         },
         alpha: 1,
         glow: 0,
+      };
+    }
+    case "fly_over": {
+      // Rises high while it passes over, with quick wing-like squashes.
+      const lift = keyframes(p, [
+        [0, 0],
+        [0.5, 1],
+        [1, 0],
+      ]);
+      const flap = Math.sin(3 * TAU * p) ** 2 * lift;
+      return {
+        pose: {
+          ...RESTING_POSE,
+          dy: -0.3 * height * lift,
+          scaleX: 1 + 0.04 * flap,
+          scaleY: 1 - 0.06 * flap,
+          rotation: -0.03 * lift,
+        },
+        alpha: 1,
+        glow: 0,
+      };
+    }
+    case "ride": {
+      // Two little bounces, as if carried along.
+      const bounce = Math.sin(2 * Math.PI * p) ** 2;
+      return {
+        pose: {
+          ...RESTING_POSE,
+          dy: -0.06 * height * bounce,
+          rotation: 0.02 * Math.sin(TAU * p),
+        },
+        alpha: 1,
+        glow: 0,
+      };
+    }
+    case "launch": {
+      // Squash on the launcher, then spring into the air.
+      const squash = keyframes(p, [
+        [0, 0],
+        [0.3, 1],
+        [0.45, 0],
+        [1, 0],
+      ]);
+      const air = keyframes(p, [
+        [0, 0],
+        [0.3, 0],
+        [0.65, 1],
+        [1, 0],
+      ]);
+      return {
+        pose: {
+          ...RESTING_POSE,
+          dy: -0.25 * height * air,
+          scaleX: 1 + 0.1 * squash - 0.04 * air,
+          scaleY: 1 - 0.12 * squash + 0.06 * air,
+          rotation: 0.05 * air,
+        },
+        alpha: 1,
+        glow: 0,
+      };
+    }
+    case "splash": {
+      // Tips forward, dips down and wobbles back up, dripping.
+      const dip = keyframes(p, [
+        [0, 0],
+        [0.35, 1],
+        [1, 0],
+      ]);
+      const wobble = Math.sin(3 * TAU * p) * (1 - p);
+      return {
+        pose: {
+          ...RESTING_POSE,
+          dx: 3 * wobble,
+          dy: 0.08 * height * dip,
+          scaleX: 1 + 0.06 * dip,
+          scaleY: 1 - 0.08 * dip,
+          rotation: 0.05 * dip + 0.02 * wobble,
+        },
+        alpha: 1,
+        glow: 0,
+      };
+    }
+    case "react": {
+      // A startled pop: a quick stretch up and a little shake.
+      const pop = keyframes(p, [
+        [0, 0],
+        [0.3, 1],
+        [1, 0],
+      ]);
+      return {
+        pose: {
+          ...RESTING_POSE,
+          dx: 2.5 * Math.sin(4 * TAU * p) * (1 - p),
+          dy: -0.06 * height * pop,
+          scaleX: 1 - 0.03 * pop,
+          scaleY: 1 + 0.06 * pop,
+        },
+        alpha: 1,
+        glow: 0.5 * pop,
       };
     }
     default:

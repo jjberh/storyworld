@@ -103,7 +103,11 @@ function requireWorld(ctx: Context, id: string) {
   const w = ctx.db.world.id.find(id);
   if (!w) throw new SenderError("World does not exist.");
   if (w.schemaVersion !== SCHEMA_VERSION)
-    throw new SenderError("Update your client.");
+    throw new SenderError(
+      w.schemaVersion < SCHEMA_VERSION
+        ? "This room was made with an older version of Storyworld. Start a new story to keep playing."
+        : "This room was made with a newer version of Storyworld. Reload the page to update.",
+    );
   return w;
 }
 function requireOwner(ctx: Context, id: string) {
@@ -194,8 +198,24 @@ function parseOperation(text: string) {
   if (!result.success) throw new SenderError("Invalid world operation.");
   return result.data;
 }
+/**
+ * Records the module's schema version. `init` only runs on a database's first
+ * publish, so connects and world creation also upsert it: republishing a new
+ * version over existing data (without --delete-data) updates the row that
+ * clients check before trusting world snapshots.
+ */
+function stampSchemaVersion(ctx: Context) {
+  const row = ctx.db.metadata.id.find("schema");
+  if (!row)
+    ctx.db.metadata.insert({ id: "schema", schemaVersion: SCHEMA_VERSION });
+  else if (row.schemaVersion !== SCHEMA_VERSION)
+    ctx.db.metadata.id.update({ ...row, schemaVersion: SCHEMA_VERSION });
+}
 export const init = db.init((ctx) => {
-  ctx.db.metadata.insert({ id: "schema", schemaVersion: SCHEMA_VERSION });
+  stampSchemaVersion(ctx);
+});
+export const onConnect = db.clientConnected((ctx) => {
+  stampSchemaVersion(ctx);
 });
 export const createWorld = db.reducer(
   { worldId: t.string() },
@@ -204,6 +224,7 @@ export const createWorld = db.reducer(
       throw new SenderError("Use 1–40 lowercase letters, digits, or hyphens.");
     if (ctx.db.world.id.find(worldId))
       throw new SenderError("This room already exists. Join it instead.");
+    stampSchemaVersion(ctx);
     ctx.db.world.insert({
       id: worldId,
       owner: ctx.sender,
@@ -250,6 +271,7 @@ export const initializeScene = db.reducer(
         "This world already exists with a different scene.",
       );
     }
+    stampSchemaVersion(ctx);
     ctx.db.world.insert({
       id: args.worldId,
       owner: ctx.sender,

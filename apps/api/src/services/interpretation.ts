@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto";
 import {
   interpretationOutput,
+  presetTraits,
   type Bounds,
-  type EntityKind,
+  type EntityPreset,
+  type EntityProperty,
   type InterpretationInput,
   type InterpretationOutput,
   type SceneInterpretationResponse,
 } from "@storyworld/contracts";
 import { ApiError } from "./errors";
-import { proposeWithGemini } from "./gemini";
+import { propertiesFor, proposeWithGemini } from "./gemini";
 import { fixtureScene, interpretSceneWithGemini } from "./scene";
 
 export type Interpreter = {
@@ -19,24 +21,37 @@ export type Interpreter = {
   ): Promise<SceneInterpretationResponse>;
 };
 
-type ProposableKind = Extract<EntityKind, "bridge" | "cloud" | "shelter">;
+const groundBounds: Bounds = { x: 385, y: 330, width: 190, height: 55 };
+const skyBounds: Bounds = { x: 580, y: 80, width: 150, height: 75 };
 
-const defaultBounds: Record<ProposableKind, Bounds> = {
-  bridge: { x: 385, y: 330, width: 190, height: 55 },
-  cloud: { x: 580, y: 80, width: 150, height: 75 },
-  shelter: { x: 580, y: 80, width: 150, height: 75 },
+const presetBounds: Record<EntityPreset, Bounds> = {
+  bridge: groundBounds,
+  cloud: skyBounds,
+  shelter: skyBounds,
 };
-const fixtureNames: Record<ProposableKind, string> = {
+const fixtureNames: Record<EntityPreset, string> = {
   bridge: "Bridge",
   cloud: "Storm cloud",
   shelter: "Shelter",
 };
+const fixtureDescriptions: Record<EntityPreset, string> = {
+  bridge: "A sturdy bridge drawn by the child.",
+  cloud: "A grey cloud full of rain.",
+  shelter: "A cozy place to stay dry.",
+};
+
+/** Where an object goes when the child did not draw a region for it. */
+function defaultBoundsFor(properties: readonly EntityProperty[]): Bounds {
+  return properties.includes("weather") || properties.includes("flies")
+    ? skyBounds
+    : groundBounds;
+}
 
 /** Deterministic keyless response: trusts the selected tool and drawn bounds. */
 export function fixtureInterpretation(
   input: InterpretationInput,
 ): InterpretationOutput {
-  const kind = input.entityKind ?? "bridge";
+  const hint = input.hint ?? "bridge";
   return interpretationOutput.parse({
     mode: "fixture",
     message:
@@ -48,9 +63,10 @@ export function fixtureInterpretation(
           type: "CREATE_ENTITY",
           entity: {
             id: randomUUID(),
-            kind,
-            name: fixtureNames[kind],
-            bounds: input.changedRegion ?? defaultBounds[kind],
+            ...presetTraits(hint),
+            name: fixtureNames[hint],
+            description: fixtureDescriptions[hint],
+            bounds: input.changedRegion ?? presetBounds[hint],
           },
         },
       },
@@ -89,7 +105,7 @@ export function createInterpreter(
   return {
     mode: "live",
     async interpret(input) {
-      if (!input.transcript && !input.image && !input.entityKind)
+      if (!input.transcript && !input.image && !input.hint)
         throw new ApiError(
           400,
           "INVALID_INPUT",
@@ -101,18 +117,26 @@ export function createInterpreter(
         message: proposal.message,
         candidates: [...proposal.candidates]
           .sort((a, b) => b.confidence - a.confidence)
-          .map((candidate) => ({
-            confidence: candidate.confidence,
-            operation: {
-              type: "CREATE_ENTITY",
-              entity: {
-                id: candidate.kind + "-" + randomUUID(),
-                kind: candidate.kind,
-                name: candidate.name,
-                bounds: input.changedRegion ?? defaultBounds[candidate.kind],
+          .map((candidate) => {
+            const properties = propertiesFor(
+              candidate.role,
+              candidate.properties,
+            );
+            return {
+              confidence: candidate.confidence,
+              operation: {
+                type: "CREATE_ENTITY",
+                entity: {
+                  id: candidate.role + "-" + randomUUID(),
+                  role: candidate.role,
+                  name: candidate.name,
+                  description: candidate.description,
+                  properties,
+                  bounds: input.changedRegion ?? defaultBoundsFor(properties),
+                },
               },
-            },
-          })),
+            };
+          }),
       });
       if (!result.success)
         throw new ApiError(

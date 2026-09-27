@@ -12,7 +12,9 @@ const scene: ConfirmedScene = {
     {
       id: "fox",
       name: "Fox",
-      kind: "character",
+      role: "character",
+      description: "",
+      properties: ["moves"],
       confidence: 1,
       imageBounds: { x: 0.1, y: 0.2, width: 0.2, height: 0.2 },
     },
@@ -29,7 +31,9 @@ describe("FixtureWorldClient", () => {
       type: "CREATE_ENTITY",
       entity: {
         id: "near-miss",
-        kind: "bridge",
+        role: "helper",
+        description: "",
+        properties: ["carries"],
         name: "Near miss bridge",
         bounds: { x: 420, y: 330, width: 119, height: 50 },
       },
@@ -37,7 +41,7 @@ describe("FixtureWorldClient", () => {
     const nearMiss = client.getSnapshot().events[0]!;
     expect(nearMiss).toMatchObject({
       revision: 1,
-      summary: "Near miss bridge added · river still blocks the route",
+      summary: "Near miss bridge added · River still blocks the route",
       state: { pathStatus: "blocked", weather: "clear" },
     });
     expect(nearMiss.id).not.toBe("");

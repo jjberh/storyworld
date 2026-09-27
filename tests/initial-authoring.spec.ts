@@ -6,7 +6,9 @@ const interpretedScene = {
   candidates: [
     {
       id: "character",
-      kind: "character",
+      role: "character",
+      description: "",
+      properties: ["moves"],
       name: "Character",
       confidence: 1,
       imageBounds: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 },

@@ -17,7 +17,9 @@ const scene: ConfirmedScene = {
     {
       id: "fox",
       name: "Fox",
-      kind: "character",
+      role: "character",
+      description: "",
+      properties: ["moves"],
       confidence: 1,
       imageBounds: { x: 0.1, y: 0.2, width: 0.2, height: 0.2 },
     },

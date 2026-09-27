@@ -7,21 +7,27 @@ const response = {
     {
       id: "fox",
       name: "Fox",
-      kind: "character",
+      role: "character",
+      description: "",
+      properties: ["moves"],
       confidence: 1,
       imageBounds: { x: 0.1, y: 0.2, width: 0.2, height: 0.2 },
     },
     {
       id: "castle",
       name: "Castle",
-      kind: "castle",
+      role: "goal",
+      description: "",
+      properties: ["goal"],
       confidence: 1,
       imageBounds: { x: 0.7, y: 0.2, width: 0.2, height: 0.2 },
     },
     {
       id: "river",
       name: "River",
-      kind: "river",
+      role: "obstacle",
+      description: "",
+      properties: ["blocks"],
       confidence: 1,
       imageBounds: { x: 0.45, y: 0.05, width: 0.12, height: 0.9 },
     },
@@ -115,7 +121,8 @@ test("a committed bridge stays visible while directing is delayed", async ({
     const request = route.request().postDataJSON();
     if (request.committedEvent.revision > 0) await bridgeGate;
     const bridge = request.committedWorld.entities.find(
-      (entity: { kind: string }) => entity.kind === "bridge",
+      (entity: { properties: string[] }) =>
+        entity.properties.includes("carries"),
     );
     await route.fulfill({
       json: {
@@ -158,7 +165,8 @@ test("a delayed older response cannot replace the newest event", async ({
     const request = route.request().postDataJSON();
     if (request.committedEvent.revision === 0) await openingGate;
     const bridge = request.committedWorld.entities.find(
-      (entity: { kind: string }) => entity.kind === "bridge",
+      (entity: { properties: string[] }) =>
+        entity.properties.includes("carries"),
     );
     await route.fulfill({
       json: {

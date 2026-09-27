@@ -9,19 +9,25 @@ import { sequenceFromCommittedEvents } from "./committed-story-sequence";
 
 const character: Entity = {
   id: "hero",
-  kind: "character",
+  role: "character",
+  description: "",
+  properties: ["moves"],
   name: "Hero",
   bounds: { x: 100, y: 300, width: 100, height: 100 },
 };
 const river: Entity = {
   id: "river",
-  kind: "river",
+  role: "obstacle",
+  description: "",
+  properties: ["blocks"],
   name: "River",
   bounds: { x: 430, y: 0, width: 100, height: 600 },
 };
 const goal: Entity = {
   id: "goal",
-  kind: "castle",
+  role: "goal",
+  description: "",
+  properties: ["goal"],
   name: "Castle",
   bounds: { x: 760, y: 220, width: 120, height: 160 },
 };
@@ -41,7 +47,7 @@ function state(
       ? { characterId: character.id, targetId: goal.id }
       : null,
     pathStatus,
-    weather: entities.some((entity) => entity.kind === "cloud")
+    weather: entities.some((entity) => entity.properties.includes("weather"))
       ? "rain"
       : "clear",
   };
@@ -92,6 +98,32 @@ describe("sequenceFromCommittedEvents", () => {
     expectValid(sequence);
   });
 
+  it("blames the obstacle on the route, not a blocker behind the hero", () => {
+    const wall: Entity = {
+      id: "wall",
+      role: "obstacle",
+      description: "",
+      properties: ["blocks"],
+      name: "Stone wall",
+      bounds: { x: 10, y: 250, width: 40, height: 200 },
+    };
+    const previous = { ...state(10, [wall, character, river, goal]) };
+    const latest = { ...previous, revision: 11 };
+    const opening = sequenceFor(state(12, [wall, character, river, goal]));
+    expect(opening?.beats.at(-1)?.action).toEqual({
+      type: "blocked_by",
+      entityId: character.id,
+      obstacleId: river.id,
+    });
+    const again = sequenceFor(latest, previous);
+    expect(JSON.stringify(again)).not.toContain('"wall"');
+    expect(again?.beats.at(-1)?.action).toEqual({
+      type: "blocked_by",
+      entityId: character.id,
+      obstacleId: river.id,
+    });
+  });
+
   it("uses the smallest valid opening for fewer scene pieces", () => {
     const onlyHero = state(1, [character], "idle");
     const sequence = sequenceFor(onlyHero);
@@ -116,7 +148,9 @@ describe("sequenceFromCommittedEvents", () => {
     const before = state(3);
     const bridge: Entity = {
       id: "bridge",
-      kind: "bridge",
+      role: "helper",
+      description: "",
+      properties: ["carries"],
       name: "Paper Bridge",
       bounds: { x: 410, y: 320, width: 140, height: 55 },
     };
@@ -136,7 +170,9 @@ describe("sequenceFromCommittedEvents", () => {
     const before = state(5);
     const shortBridge: Entity = {
       id: "short-bridge",
-      kind: "bridge",
+      role: "helper",
+      description: "",
+      properties: ["carries"],
       name: "Short Bridge",
       bounds: { x: 440, y: 320, width: 40, height: 55 },
     };
@@ -152,7 +188,9 @@ describe("sequenceFromCommittedEvents", () => {
   it("only reveals an added bridge when the route was already available", () => {
     const firstBridge: Entity = {
       id: "first-bridge",
-      kind: "bridge",
+      role: "helper",
+      description: "",
+      properties: ["carries"],
       name: "First Bridge",
       bounds: { x: 410, y: 250, width: 140, height: 55 },
     };
@@ -173,7 +211,9 @@ describe("sequenceFromCommittedEvents", () => {
     const before = state(7);
     const cloud: Entity = {
       id: "cloud",
-      kind: "cloud",
+      role: "scenery",
+      description: "",
+      properties: ["weather"],
       name: "Cloud",
       bounds: { x: 600, y: 80, width: 150, height: 75 },
     };
@@ -190,7 +230,9 @@ describe("sequenceFromCommittedEvents", () => {
     const before = state(9);
     const shelter: Entity = {
       id: "shelter",
-      kind: "shelter",
+      role: "helper",
+      description: "",
+      properties: ["shelters"],
       name: "Tent",
       bounds: { x: 250, y: 200, width: 100, height: 100 },
     };

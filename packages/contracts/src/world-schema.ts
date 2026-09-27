@@ -11,20 +11,48 @@ export const boundsSchema = z
   })
   .strict();
 
-export const entityKindSchema = z.enum([
+export const entityRoleSchema = z.enum([
   "character",
-  "castle",
-  "river",
-  "bridge",
-  "cloud",
-  "shelter",
+  "goal",
+  "obstacle",
+  "helper",
+  "scenery",
 ]);
+
+export const entityPropertySchema = z.enum([
+  "moves",
+  "flies",
+  "swims",
+  "floats",
+  "carries",
+  "launches",
+  "blocks",
+  "burns",
+  "scares",
+  "shelters",
+  "weather",
+  "goal",
+]);
+
+// Required, not defaulted: the module compares canonical JSON for idempotent
+// scene initialization, so a parse must never add fields.
+export const entityDescriptionSchema = z.string().trim().max(200);
+
+export const entityPropertiesSchema = z
+  .array(entityPropertySchema)
+  .max(6)
+  .refine(
+    (properties) => new Set(properties).size === properties.length,
+    "Properties must not repeat.",
+  );
 
 export const entitySchema = z
   .object({
     id: entityIdSchema,
+    role: entityRoleSchema,
     name: z.string().trim().min(1).max(80),
-    kind: entityKindSchema,
+    description: entityDescriptionSchema,
+    properties: entityPropertiesSchema,
     bounds: boundsSchema,
   })
   .strict();
@@ -103,7 +131,7 @@ export const worldStateSchema = z
         });
     });
     if (world.goal) {
-      if (entities.get(world.goal.characterId)?.kind !== "character")
+      if (entities.get(world.goal.characterId)?.role !== "character")
         ctx.addIssue({
           code: "custom",
           path: ["goal", "characterId"],

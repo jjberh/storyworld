@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EntityKind } from "@storyworld/contracts/model";
+import type { Entity, EntityProperty } from "@storyworld/contracts/model";
 import {
   RESTING_POSE,
   approach,
@@ -15,7 +15,16 @@ import {
   type Pose,
 } from "./stage-motion";
 
-const motions: IdleMotion[] = ["hop", "drift", "shimmer", "breathe"];
+const motions: IdleMotion[] = [
+  "hop",
+  "glide",
+  "sway",
+  "roll",
+  "spring",
+  "drift",
+  "shimmer",
+  "breathe",
+];
 
 function distance(a: Pose, b: Pose) {
   return Math.max(
@@ -28,15 +37,31 @@ function distance(a: Pose, b: Pose) {
 }
 
 describe("idleMotionFor", () => {
-  it.each<[EntityKind, IdleMotion]>([
-    ["character", "hop"],
-    ["cloud", "drift"],
-    ["river", "shimmer"],
-    ["bridge", "breathe"],
-    ["castle", "breathe"],
-    ["shelter", "breathe"],
-  ])("gives a %s the %s loop", (kind, motion) => {
-    expect(idleMotionFor({ kind })).toBe(motion);
+  it.each<[Entity["role"], EntityProperty[], IdleMotion]>([
+    // Characters keep a lively idle.
+    ["character", ["moves"], "hop"],
+    ["character", [], "hop"],
+    ["character", ["flies"], "glide"],
+    // Everything else moves the way its properties say.
+    ["scenery", ["weather"], "drift"],
+    ["scenery", ["flies"], "glide"],
+    ["helper", ["flies", "carries"], "glide"],
+    ["helper", ["floats", "carries"], "sway"],
+    ["scenery", ["swims"], "sway"],
+    ["helper", ["launches"], "spring"],
+    ["helper", ["moves", "carries"], "roll"],
+    ["obstacle", ["blocks"], "shimmer"],
+    ["helper", ["carries"], "breathe"],
+    ["goal", ["goal"], "breathe"],
+    ["scenery", [], "breathe"],
+  ])("gives a %s with %j the %s loop", (role, properties, motion) => {
+    expect(idleMotionFor({ role, properties })).toBe(motion);
+  });
+
+  it("lets weather drift even when it also flies", () => {
+    expect(
+      idleMotionFor({ role: "scenery", properties: ["flies", "weather"] }),
+    ).toBe("drift");
   });
 });
 
@@ -132,6 +157,36 @@ describe("beatPulse", () => {
 
   it("jumps a celebrating piece by 15% of its height", () => {
     expect(beatPulse("celebrate", 324, 200).pose.dy).toBeCloseTo(-30);
+  });
+
+  it.each(["fly_over", "ride", "launch", "splash", "react"] as const)(
+    "plays a short %s flourish that starts and ends at rest",
+    (type) => {
+      const duration = beatPulseDurationMs(type);
+      expect(duration).toBeGreaterThan(0);
+      expect(duration).toBeLessThan(1000);
+      expect(distance(beatPulse(type, 0, 100).pose, RESTING_POSE)).toBeLessThan(
+        1e-9,
+      );
+      expect(beatPulse(type, duration, 100).pose).toEqual(RESTING_POSE);
+      let moved = 0;
+      for (let time = 0; time < duration; time += 16) {
+        const pose = beatPulse(type, time, 100).pose;
+        moved = Math.max(moved, distance(pose, RESTING_POSE));
+        expect(
+          distance(pose, beatPulse(type, time + 16, 100).pose),
+        ).toBeLessThan(3);
+      }
+      expect(moved).toBeGreaterThan(0.02);
+    },
+  );
+
+  it("lifts a flyer, dips a splash and springs a launch upward", () => {
+    expect(beatPulse("fly_over", 380, 100).pose.dy).toBeCloseTo(-30);
+    expect(beatPulse("splash", 217, 100).pose.dy).toBeGreaterThan(7);
+    expect(beatPulse("launch", 192, 100).pose.scaleY).toBeLessThan(0.9);
+    expect(beatPulse("launch", 416, 100).pose.dy).toBeCloseTo(-25);
+    expect(beatPulse("react", 156, 100).glow).toBeCloseTo(0.5);
   });
 });
 

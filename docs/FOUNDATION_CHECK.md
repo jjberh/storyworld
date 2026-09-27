@@ -44,14 +44,20 @@ to create the world.
 
 Maincloud `storyworld-zhvbk` now has this foundation module, including
 `story_document` and `initializeScene`. Its first migration did not run `init`,
-so the metadata row (`id='schema'`, `schema_version=1`) was inserted manually.
+so the metadata row (`id='schema'`) was inserted manually. The module now
+upserts that row to its `SCHEMA_VERSION` on `init`, on every client connect, and
+when a world is created, so publishing a new schema version over existing data
+(without `--delete-data`) updates it on the first connection. Worlds created
+under an older schema version are refused by the reducers, and the web client
+shows "This room was made with an older version of Storyworld…" instead of
+opening them.
 Only Josh should publish further changes. Browser identities are anonymous and
 persisted per database in browser storage. Table reads are public in this
 hackathon foundation; rooms separate edits, not confidential data.
 
 ## What is implemented
 
-- Typed world operations, geometric bridge rule, revisions, idempotency, director authorization, guest proposals, event snapshots, reset and restore.
+- Typed world operations, entities with a role and properties (`SCHEMA_VERSION` 2), a geometric rule where anything that `blocks` is spanned by a `helper` that `carries`, rain from anything with `weather`, revisions, idempotency, director authorization, guest proposals, event snapshots, reset and restore.
 - React shell, Konva stroke input, Pixi procedural scene, same-origin API proxy, mobile route, fixture/live adapters.
 - The default route starts from a blank canvas or uploaded PNG/JPEG/WebP,
   preserves the source artwork beneath later strokes, and submits the composite
@@ -61,7 +67,8 @@ hackathon foundation; rooms separate edits, not confidential data.
   answers **Yes, that's right!**, **Change it** (rename, retype, or redraw its
   region), or **That is not in my picture**; **I missed something** adds an
   object. Exactly one character is required. Changing the picture or prompt
-  requires reinterpretation. No fear rule is inferred from a detected river.
+  requires reinterpretation. Retyping an object gives it that role's default
+  properties. No fear rule is inferred from a detected obstacle.
   **Start my story** freezes one world ID and request ID and calls
   `initializeScene`, which atomically creates the confirmed world and retains its
   `StoryDocument`; local fixture worlds last for the page session, while live

@@ -27,7 +27,7 @@ function restingSnapshot(world: WorldState): StageSnapshot {
     entities: world.entities.map((entity) => ({
       id: entity.id,
       name: entity.name,
-      kind: entity.kind,
+      role: entity.role,
       revealState: "visible",
       placement: "source",
       logicalX: logicalX(entity, undefined),

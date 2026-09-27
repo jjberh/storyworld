@@ -10,8 +10,10 @@ export function worldFromScene(id: string, input: ConfirmedScene): WorldState {
     type: "CREATE_ENTITY",
     entity: {
       id: object.id,
+      role: object.role,
       name: object.name,
-      kind: object.kind,
+      description: object.description,
+      properties: object.properties,
       bounds: {
         x: object.imageBounds.x * 1000,
         y: object.imageBounds.y * 600,
@@ -32,14 +34,14 @@ export function worldFromScene(id: string, input: ConfirmedScene): WorldState {
       characterId: scene.characterId,
       targetId: scene.goalId,
     });
-  if (scene.fearedRiverId)
+  if (scene.fearedObstacleId)
     operations.push({
       type: "ADD_RULE",
       rule: {
         id: "initial-fear",
         subjectId: scene.characterId,
         predicate: "afraid_of",
-        objectId: scene.fearedRiverId,
+        objectId: scene.fearedObstacleId,
       },
     });
   const empty: WorldState = {

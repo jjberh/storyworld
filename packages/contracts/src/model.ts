@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export type Bounds = { x: number; y: number; width: number; height: number };
 export type ImageBounds = {
   x: number;
@@ -6,12 +6,31 @@ export type ImageBounds = {
   width: number;
   height: number;
 };
-export type EntityKind =
-  "character" | "castle" | "river" | "bridge" | "cloud" | "shelter";
+/** What the engine needs an entity for. Behaviour comes from `properties`. */
+export type EntityRole =
+  "character" | "goal" | "obstacle" | "helper" | "scenery";
+/** A closed list of things an entity can do in the world. */
+export type EntityProperty =
+  | "moves"
+  | "flies"
+  | "swims"
+  | "floats"
+  | "carries"
+  | "launches"
+  | "blocks"
+  | "burns"
+  | "scares"
+  | "shelters"
+  | "weather"
+  | "goal";
 export type Entity = {
   id: string;
-  kind: EntityKind;
+  role: EntityRole;
+  /** Friendly name for narration, e.g. "Sparkle the dragon". */
   name: string;
+  /** Short model-written description. Untrusted text: narration only. */
+  description: string;
+  properties: EntityProperty[];
   bounds: Bounds;
 };
 export type StoryMood = "curious" | "worried" | "delighted";
@@ -24,8 +43,10 @@ export type InitialSceneResponse = {
 };
 export type SceneCandidate = {
   id: string;
-  kind: EntityKind;
+  role: EntityRole;
   name: string;
+  description: string;
+  properties: EntityProperty[];
   confidence: number;
   imageBounds: ImageBounds;
 };
