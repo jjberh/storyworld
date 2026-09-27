@@ -464,6 +464,7 @@ input:focus-visible {
 }
 .narration,
 .room-card,
+.movie-card,
 .presence-card,
 .proposals-card,
 .moments-card {
@@ -496,6 +497,7 @@ aside {
   gap: 18px;
 }
 .room-card,
+.movie-card,
 .presence-card,
 .proposals-card,
 .moments-card {
@@ -508,6 +510,7 @@ h2 {
   font-weight: 900;
 }
 .room-card,
+.movie-card,
 .presence-card {
   display: grid;
   gap: 10px;
@@ -528,6 +531,27 @@ h2 {
   color: #1f0c33;
   font-size: 13px;
   font-weight: 900;
+}
+.movie-progress {
+  width: 100%;
+  height: 12px;
+  overflow: hidden;
+  appearance: none;
+  background: #f0e9fc;
+  border: 2px solid #3a1b6b;
+  border-radius: 999px;
+}
+.movie-progress::-webkit-progress-bar {
+  background: #f0e9fc;
+}
+.movie-progress::-webkit-progress-value {
+  background: #6c30a3;
+}
+.movie-progress::-moz-progress-bar {
+  background: #6c30a3;
+}
+.movie-error {
+  color: #9b2c2c;
 }
 .card-help {
   margin: 2px 0 4px;

@@ -8,7 +8,9 @@ import type {
 import { LiveWorldClient } from "../services/world-client";
 import { peekWorldClient, type RoomMode } from "../services/world-session";
 import paintbrushIcon from "../assets/figma/paintbrush.svg";
+import type { StorySequence } from "@storyworld/contracts/story-beat";
 import { StoryStage } from "../features/world-renderer/StoryStage";
+import { KeepsakeButton } from "../features/keepsake/KeepsakeButton";
 import { bridgeOperationForWorld } from "./story-room-operations";
 import { useDirectedStorySequence } from "./use-directed-story-sequence";
 
@@ -109,6 +111,22 @@ export function StoryRoom({ worldId }: { worldId: string }) {
     previousEvent,
     scene,
   );
+
+  // Every sequence this room has played, by committed event ID, so the
+  // keepsake movie can replay them. Presentation history only: the world
+  // itself stays in SpacetimeDB.
+  const [playedSequences, setPlayedSequences] = useState<
+    ReadonlyMap<string, StorySequence>
+  >(() => new Map());
+  const playedSequence = directedStory.sequence;
+  useEffect(() => {
+    if (!playedSequence) return;
+    setPlayedSequences((current) =>
+      current.get(playedSequence.sourceEventId) === playedSequence
+        ? current
+        : new Map(current).set(playedSequence.sourceEventId, playedSequence),
+    );
+  }, [playedSequence]);
 
   if (session.missingFixture)
     return (
@@ -250,6 +268,13 @@ export function StoryRoom({ worldId }: { worldId: string }) {
                 Copy guest link
               </button>
             </div>
+            {scene && (
+              <KeepsakeButton
+                scene={scene}
+                events={snapshot.events}
+                sequences={playedSequences}
+              />
+            )}
             <div className="presence-card" data-testid="room-presence">
               <h2>In this room</h2>
               <strong data-testid="presence-count">
