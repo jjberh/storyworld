@@ -143,6 +143,7 @@ const pixi = vi.hoisted(() => {
 vi.mock("pixi.js", () => pixi.module);
 
 const { StoryStageRenderer } = await import("./story-stage-renderer");
+const { introDurationMs } = await import("./intro-motion");
 
 type FakeImage = {
   src: string;
@@ -536,5 +537,127 @@ describe("StoryStageRenderer tap reactions", () => {
     expect(tappable(stage, "castle").eventMode).toBe("static");
     expect(stage.react("castle")).toBeDefined();
     stage.destroy();
+  });
+});
+
+describe("StoryStageRenderer recording features", () => {
+  type Stage = InstanceType<typeof StoryStageRenderer>;
+  type Shown = { alpha: number; children: unknown[] };
+  const piece = (stage: Stage, id: string) =>
+    stage.entityObject(id) as unknown as Shown;
+  const layers = () => pixi.state.apps.at(-1)!.stage.children as Shown[];
+  async function run(milliseconds: number) {
+    const app = pixi.state.apps.at(-1)!;
+    for (let elapsed = 0; elapsed < milliseconds; elapsed += 16) {
+      app.tick(16);
+      await flush();
+    }
+  }
+
+  it("lifts the pieces off the paper in an intro", async () => {
+    const stage = new StoryStageRenderer({ scene, world: world() });
+    await stage.ready;
+    let done = false;
+    void stage
+      .playIntro(new AbortController().signal, { caption: "Fox explores." })
+      .then(() => (done = true));
+    expect(stage.getSnapshot().caption).toBe("Fox explores.");
+    await run(16);
+    expect(piece(stage, "fox").alpha).toBe(0);
+    expect(layers()[1]!.alpha).toBe(0); // the mattes
+    await run(introDurationMs(3) + 32);
+    expect(done).toBe(true);
+    expect(piece(stage, "fox").alpha).toBe(1);
+    expect(layers()[1]!.alpha).toBe(1);
+    stage.destroy();
+  });
+
+  it("holds beats for at least minBeatHoldMs", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world(),
+      minBeatHoldMs: 1400,
+    });
+    await stage.ready;
+    void stage.playSequence(sequence, new AbortController().signal);
+    await run(1000);
+    expect(stage.getSnapshot().caption).toBe("Fox sets off.");
+    await run(500);
+    expect(stage.getSnapshot().caption).toBe("River stops the way.");
+    stage.destroy();
+  });
+
+  it("shows a sequence's world with its revealed piece hidden from the start", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world([fox, river]),
+    });
+    await stage.ready;
+    void stage.playSequence(
+      {
+        ...sequence,
+        sourceEventId: "event-castle",
+        beats: [
+          {
+            id: "beat-1",
+            narration: "Fox looks up.",
+            mood: "curious",
+            action: { type: "focus", entityId: "fox" },
+          },
+          {
+            id: "beat-2",
+            narration: "Castle appears.",
+            mood: "delighted",
+            action: { type: "reveal", entityId: "castle" },
+          },
+        ],
+      },
+      new AbortController().signal,
+      world(),
+    );
+    await run(16);
+    expect(piece(stage, "castle").alpha).toBe(0);
+    expect(
+      stage.getSnapshot().entities.find((item) => item.id === "castle")
+        ?.revealState,
+    ).toBe("hidden");
+    stage.destroy();
+  });
+
+  it("draws captions and a title card on the canvas only when asked", async () => {
+    const plain = new StoryStageRenderer({ scene, world: world() });
+    await plain.ready;
+    void plain.playSequence(sequence, new AbortController().signal);
+    await run(16);
+    const [, , , , , captions, title] = layers();
+    expect(captions!.children).toHaveLength(0);
+    expect(title!.children).toHaveLength(0);
+    plain.destroy();
+
+    const recorded = new StoryStageRenderer({
+      scene,
+      world: world(),
+      canvasCaptions: true,
+    });
+    await recorded.ready;
+    // The initial "ready" caption is never burned in.
+    await run(16);
+    expect(layers()[5]!.children).toHaveLength(0);
+    void recorded.playSequence(sequence, new AbortController().signal);
+    await run(16);
+    expect(layers()[5]!.children).toHaveLength(2);
+    recorded.showTitleCard({ title: "Fox's story", subtitle: "Made here" });
+    await run(16);
+    expect(layers()[5]!.children).toHaveLength(0);
+    expect(layers()[6]!.children).toHaveLength(4);
+    expect(layers()[6]!.alpha).toBeGreaterThan(0);
+    expect(layers()[6]!.alpha).toBeLessThan(1);
+    await run(600);
+    expect(layers()[6]!.alpha).toBe(1);
+    recorded.showTitleCard(null);
+    await run(16);
+    expect(layers()[6]!.children).toHaveLength(0);
+    expect(layers()[5]!.children).toHaveLength(2);
+    recorded.destroy();
   });
 });

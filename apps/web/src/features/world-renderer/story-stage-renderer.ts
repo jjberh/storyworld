@@ -27,6 +27,13 @@ import {
   type IdleMotion,
 } from "./stage-motion";
 import {
+  introBackdrop,
+  introDurationMs,
+  RESTING_BACKDROP_ALPHA,
+  sampleIntro,
+  weightPose,
+} from "./intro-motion";
+import {
   beatHoldMs,
   beatMovement,
   center,
@@ -106,7 +113,21 @@ export type StoryStageOptions = {
    * event it had already started.
    */
   resting?: StageRestingState;
+  /**
+   * Draw the current beat's narration on the canvas itself, as a paper strip
+   * along the bottom. Off by default: the live stage shows its caption in the
+   * DOM. A recording turns it on so the movie carries its captions.
+   */
+  canvasCaptions?: boolean;
+  /**
+   * The shortest time a beat holds, in milliseconds. A recording lengthens
+   * beats so their captions stay readable; the live stage leaves this at 0.
+   */
+  minBeatHoldMs?: number;
 };
+
+/** A centred paper card drawn over the stage, e.g. a movie's end card. */
+export type StageTitleCard = { title: string; subtitle?: string };
 
 /** Where a stage's story stands, for handing over to a new instance. */
 export type StageRestingState = {
@@ -127,6 +148,8 @@ const PAPER = 0xfffaf0;
 const PAPER_EDGE = 0xfffdf5;
 const INK = 0x3a1b6b;
 const REVEAL_FADE_MS = 240;
+const TITLE_FADE_MS = 450;
+const CAPTION_FONT = "Georgia, 'Times New Roman', serif";
 
 const tokenColors: Record<Entity["kind"], number> = {
   bridge: 0xbd765c,
@@ -238,6 +261,19 @@ export class StoryStageRenderer {
   private textures: Texture[] = [];
 
   private readonly backdrop = new Container();
+  private backdropSprite: Sprite | undefined;
+  private readonly captionLayer = new Container();
+  private readonly titleLayer = new Container();
+  private readonly canvasCaptions: boolean;
+  private readonly minBeatHoldMs: number;
+  /** What the canvas caption and title card were last drawn as. */
+  private drawnCaption: string | undefined;
+  private drawnTitle: StageTitleCard | null = null;
+  private titleCard: StageTitleCard | null = null;
+  private titleStartMs = 0;
+  private introStartMs: number | undefined;
+  /** Lift order for the intro (scenery first, travellers last). */
+  private introOrder = new Map<string, number>();
   private readonly mattes = new Graphics();
   private readonly entityLayer = new Container();
   private readonly rainLayer = new Graphics();
@@ -273,6 +309,8 @@ export class StoryStageRenderer {
     this.interactive = options.interactive ?? false;
     this.keepCommittedRevealsVisible =
       options.keepCommittedRevealsVisible ?? false;
+    this.canvasCaptions = options.canvasCaptions ?? false;
+    this.minBeatHoldMs = Math.max(0, options.minBeatHoldMs ?? 0);
     this.size = {
       width: options.width ?? STAGE_WIDTH,
       height: options.height ?? STAGE_HEIGHT,
@@ -320,10 +358,15 @@ export class StoryStageRenderer {
    * Plays one directed sequence beat by beat on the stage clock. Passing
    * `null` resets the stage to rest. Starting a new sequence cancels the one
    * in flight. Resolves when the sequence ends or `signal` aborts.
+   *
+   * `nextWorld`, when given, is shown together with the sequence, so a piece the
+   * sequence reveals stays hidden from its first frame instead of flashing in
+   * between a separate `setWorld` and this call.
    */
   async playSequence(
     sequence: StorySequence | null,
     signal: AbortSignal,
+    nextWorld?: WorldState,
   ): Promise<void> {
     if (this.destroyed) return;
     this.playback?.abort();
@@ -335,10 +378,14 @@ export class StoryStageRenderer {
     const aborted = () => playback.signal.aborted || this.destroyed;
 
     try {
-      const world = this.world;
       const resume = this.resumeFrom;
       this.resumeFrom = undefined;
       this.sequence = sequence;
+      if (nextWorld && !this.destroyed) {
+        this.world = nextWorld;
+        if (this.initialized) this.syncViews();
+      }
+      const world = this.world;
       this.setAction(null);
       if (sequence && resume?.eventId === sequence.sourceEventId) {
         this.settle(sequence, resume.beats, world);
@@ -368,7 +415,7 @@ export class StoryStageRenderer {
         this.playedBeats = index + 1;
         this.emit();
         await this.wait(
-          beatHoldMs(action, this.reducedMotion),
+          Math.max(beatHoldMs(action, this.reducedMotion), this.minBeatHoldMs),
           playback.signal,
         );
       }
@@ -380,6 +427,52 @@ export class StoryStageRenderer {
       signal.removeEventListener("abort", stop);
       if (this.playback === playback) this.playback = undefined;
     }
+  }
+
+  /**
+   * The reveal where pieces lift off the paper: the drawing starts flat, then
+   * each piece peels up, rises with a small shake and settles into its idle
+   * loop (under reduced motion they only fade in). `caption` replaces the
+   * caption for the intro. Resolves when the intro ends or `signal` aborts.
+   * Story beats and tap reactions layer over it as usual.
+   */
+  async playIntro(
+    signal: AbortSignal,
+    options: { caption?: string } = {},
+  ): Promise<void> {
+    if (this.destroyed || signal.aborted) return;
+    const ordered = [...this.world.entities].sort(
+      (a, b) => paintLayer[a.kind] - paintLayer[b.kind],
+    );
+    this.introOrder = new Map(
+      ordered.map((entity, index) => [entity.id, index]),
+    );
+    const startMs = this.clockMs;
+    this.introStartMs = startMs;
+    if (options.caption) {
+      this.caption = options.caption;
+      this.emit();
+    }
+    try {
+      await this.wait(introDurationMs(ordered.length), signal);
+    } finally {
+      if (this.introStartMs === startMs) this.introStartMs = undefined;
+    }
+  }
+
+  /** Resolves after `milliseconds` on the stage clock, or when `signal` aborts. */
+  hold(milliseconds: number, signal: AbortSignal): Promise<void> {
+    return this.wait(Math.max(0, milliseconds), signal);
+  }
+
+  /**
+   * Shows a centred paper card (fading in) over the stage and hides the
+   * canvas caption while it is up; `null` removes it.
+   */
+  showTitleCard(card: StageTitleCard | null) {
+    if (this.destroyed) return;
+    if (card && !this.titleCard) this.titleStartMs = this.clockMs;
+    this.titleCard = card;
   }
 
   /** Resizes the canvas (CSS pixels). The 1000x600 world scales to fit. */
@@ -488,6 +581,8 @@ export class StoryStageRenderer {
       this.entityLayer,
       this.rainLayer,
       this.confettiLayer,
+      this.captionLayer,
+      this.titleLayer,
     );
     if (this.interactive) {
       // Pixi claims every touch gesture on its canvas by default. Let the
@@ -756,14 +851,16 @@ export class StoryStageRenderer {
 
   private drawBackdrop() {
     this.clearChildren(this.backdrop);
+    this.backdropSprite = undefined;
     if (this.imageStatus === "loaded" && this.image) {
       this.imageSource ??= new ImageSource({ resource: this.image });
       const sprite = new Sprite(new Texture({ source: this.imageSource }));
       this.textures.push(sprite.texture);
       sprite.width = STAGE_WIDTH;
       sprite.height = STAGE_HEIGHT;
-      sprite.alpha = 0.42;
+      sprite.alpha = RESTING_BACKDROP_ALPHA;
       this.backdrop.addChild(sprite);
+      this.backdropSprite = sprite;
     }
   }
 
@@ -974,6 +1071,9 @@ export class StoryStageRenderer {
     const pending = this.pendingReveal();
     const action = this.action;
     const activeId = action && "entityId" in action ? action.entityId : "";
+    const introMs =
+      this.introStartMs === undefined ? undefined : now - this.introStartMs;
+    const introCount = this.introOrder.size;
 
     for (const view of this.views.values()) {
       const { entity, container } = view;
@@ -981,9 +1081,22 @@ export class StoryStageRenderer {
       const offset = this.reducedMotion
         ? view.moveTo
         : tweenOffset(view.moveFrom, view.moveTo, now - view.moveStartMs);
-      const idle = this.reducedMotion
-        ? RESTING_POSE
-        : sampleMotion(view.motion, now, view.seed);
+      // A piece that joined mid-intro lifts last.
+      const intro =
+        introMs === undefined
+          ? undefined
+          : sampleIntro(
+              introMs,
+              this.introOrder.get(entity.id) ?? introCount - 1,
+              introCount,
+              this.reducedMotion,
+            );
+      const idle = weightPose(
+        this.reducedMotion
+          ? RESTING_POSE
+          : sampleMotion(view.motion, now, view.seed),
+        intro?.idle ?? 1,
+      );
       const pulsing =
         !this.reducedMotion &&
         activeId === entity.id &&
@@ -1012,6 +1125,7 @@ export class StoryStageRenderer {
         : undefined;
       const pose = combinePoses(
         idle,
+        intro?.pose ?? RESTING_POSE,
         pulse?.pose ?? RESTING_POSE,
         reaction?.pose ?? RESTING_POSE,
       );
@@ -1021,7 +1135,8 @@ export class StoryStageRenderer {
       );
       container.scale.set(pose.scaleX * hiddenScale, pose.scaleY * hiddenScale);
       container.rotation = pose.rotation;
-      container.alpha = (1 - view.hidden) * (pulse?.alpha ?? 1);
+      container.alpha =
+        (1 - view.hidden) * (pulse?.alpha ?? 1) * (intro?.alpha ?? 1);
       if (view.glow)
         view.glow.alpha = Math.max(
           pulse?.glow ?? 0,
@@ -1030,8 +1145,115 @@ export class StoryStageRenderer {
         );
     }
 
+    const paper =
+      introMs === undefined
+        ? { backdropAlpha: RESTING_BACKDROP_ALPHA, matteAlpha: 1 }
+        : introBackdrop(introMs, introCount);
+    if (this.backdropSprite) this.backdropSprite.alpha = paper.backdropAlpha;
+    this.mattes.alpha = paper.matteAlpha;
+
     this.drawRain(now);
     this.drawConfetti(now);
+    this.drawCanvasCaption();
+    this.drawTitleCard(now);
+  }
+
+  /** The caption as a paper strip along the bottom, like the DOM caption. */
+  private drawCanvasCaption() {
+    const text =
+      this.canvasCaptions && !this.titleCard && this.caption !== INITIAL_CAPTION
+        ? this.caption
+        : "";
+    if (text === this.drawnCaption) return;
+    this.drawnCaption = text;
+    this.clearChildren(this.captionLayer);
+    if (!text) return;
+    const maxWidth = STAGE_WIDTH * 0.88;
+    const label = new Text({
+      text,
+      style: {
+        fontFamily: CAPTION_FONT,
+        fontSize: 26,
+        fontWeight: "700",
+        lineHeight: 32,
+        fill: INK,
+        align: "center",
+        wordWrap: true,
+        wordWrapWidth: maxWidth - 36,
+      },
+    });
+    label.anchor.set(0.5);
+    const width = Math.min(maxWidth, label.width + 36);
+    const height = label.height + 20;
+    const x = STAGE_WIDTH / 2;
+    const y = STAGE_HEIGHT * 0.96 - height / 2;
+    label.position.set(x, y);
+    const strip = new Graphics()
+      .roundRect(x - width / 2, y - height / 2 + 3, width, height, 5)
+      .fill({ color: INK, alpha: 0.12 })
+      .roundRect(x - width / 2, y - height / 2, width, height, 5)
+      .fill({ color: PAPER_EDGE, alpha: 0.94 })
+      .stroke({ width: 1.5, color: INK, alpha: 0.24 });
+    this.captionLayer.addChild(strip, label);
+  }
+
+  private drawTitleCard(now: number) {
+    const card = this.titleCard;
+    if (card !== this.drawnTitle) {
+      this.drawnTitle = card;
+      this.clearChildren(this.titleLayer);
+      if (card) this.buildTitleCard(card);
+    }
+    this.titleLayer.alpha = card
+      ? Math.min(1, (now - this.titleStartMs) / TITLE_FADE_MS)
+      : 0;
+  }
+
+  private buildTitleCard(card: StageTitleCard) {
+    const wash = new Graphics()
+      .rect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
+      .fill({ color: PAPER, alpha: 0.6 });
+    const title = new Text({
+      text: card.title,
+      style: {
+        fontFamily: CAPTION_FONT,
+        fontSize: 54,
+        fontWeight: "700",
+        fill: INK,
+        align: "center",
+        wordWrap: true,
+        wordWrapWidth: 620,
+      },
+    });
+    title.anchor.set(0.5);
+    const subtitle = card.subtitle
+      ? new Text({
+          text: card.subtitle,
+          style: {
+            fontFamily: '"Trebuchet MS", Arial, sans-serif',
+            fontSize: 24,
+            fontWeight: "900",
+            fill: 0x6c30a3,
+            align: "center",
+          },
+        })
+      : undefined;
+    subtitle?.anchor.set(0.5);
+    const inner = title.height + (subtitle ? 16 + subtitle.height : 0);
+    const width = Math.max(420, title.width + 96, (subtitle?.width ?? 0) + 96);
+    const height = inner + 72;
+    const cx = STAGE_WIDTH / 2;
+    const cy = STAGE_HEIGHT / 2;
+    const paper = new Graphics()
+      .roundRect(cx - width / 2 + 2, cy - height / 2 + 8, width, height, 10)
+      .fill({ color: INK, alpha: 0.14 })
+      .roundRect(cx - width / 2, cy - height / 2, width, height, 10)
+      .fill(PAPER_EDGE)
+      .stroke({ width: 3, color: INK });
+    title.position.set(cx, cy - inner / 2 + title.height / 2);
+    subtitle?.position.set(cx, cy + inner / 2 - subtitle.height / 2);
+    this.titleLayer.addChild(wash, paper, title);
+    if (subtitle) this.titleLayer.addChild(subtitle);
   }
 
   private drawRain(now: number) {
