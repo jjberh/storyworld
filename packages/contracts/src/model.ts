@@ -55,7 +55,8 @@ export type SceneInterpretationResponse = {
   message: string;
   candidates: SceneCandidate[];
   openingNarration: string;
-  characterCandidateId: string;
+  /** Absent when the picture has no clear character. */
+  characterCandidateId?: string;
   goalCandidateId?: string;
   moodHints: StoryMood[];
 };

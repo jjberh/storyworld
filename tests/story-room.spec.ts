@@ -47,8 +47,7 @@ async function startRoom(page: Page) {
   await page
     .getByRole("button", { name: "Bring my world to life", exact: true })
     .click();
-  for (let index = 0; index < response.candidates.length; index++)
-    await page.getByRole("button", { name: "Yes, that's right!" }).click();
+  // Every candidate is sure, so nothing needs a question.
   await page.getByRole("button", { name: "Start my story" }).click();
   await expect(
     page.getByRole("heading", { name: "Your Story Room" }),
