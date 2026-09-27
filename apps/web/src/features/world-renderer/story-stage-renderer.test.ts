@@ -18,6 +18,11 @@ const pixi = vi.hoisted(() => {
     alpha = 1;
     rotation = 0;
     label: string | undefined;
+    eventMode: string | undefined;
+    cursor: string | undefined;
+    hitArea: unknown;
+    interactiveChildren = true;
+    handlers: Record<string, ((event: { button: number }) => void)[]> = {};
     position = { set: () => undefined };
     scale = { set: () => undefined };
     anchor = { set: () => undefined };
@@ -27,6 +32,13 @@ const pixi = vi.hoisted(() => {
     addChild(...children: FakeContainer[]) {
       this.children.push(...children);
       return children[0];
+    }
+    on(name: string, handler: (event: { button: number }) => void) {
+      (this.handlers[name] ??= []).push(handler);
+      return this;
+    }
+    emit(name: string, event = { button: 0 }) {
+      for (const handler of this.handlers[name] ?? []) handler(event);
     }
     removeChildren() {
       const removed = this.children;
@@ -81,13 +93,18 @@ const pixi = vi.hoisted(() => {
       add: (listener: (ticker: { deltaMS: number }) => void) =>
         this.tickers.push(listener),
     };
-    renderer = { resize: () => undefined };
+    renderer = {
+      resize: () => undefined,
+      events: { autoPreventDefault: true },
+    };
+    options: Record<string, unknown> = {};
     destroy = vi.fn();
     finishInit: () => void = () => undefined;
     constructor() {
       state.apps.push(this);
     }
-    init() {
+    init(options: Record<string, unknown>) {
+      this.options = options;
       if (state.initResult === "reject")
         return Promise.reject(new Error("no WebGL"));
       if (state.initResult === "resolve") return Promise.resolve();
@@ -108,7 +125,14 @@ const pixi = vi.hoisted(() => {
       ImageSource: class {
         destroy() {}
       },
-      Rectangle: class {},
+      Rectangle: class {
+        constructor(
+          public x: number,
+          public y: number,
+          public width: number,
+          public height: number,
+        ) {}
+      },
       Sprite: FakeSprite,
       Text: FakeText,
       Texture: FakeTexture,
@@ -139,7 +163,7 @@ beforeEach(() => {
     matchMedia: () => ({ matches: false }),
   });
   vi.stubGlobal("document", {
-    createElement: () => ({ remove: vi.fn() }),
+    createElement: () => ({ remove: vi.fn(), style: {} }),
   });
   vi.stubGlobal(
     "Image",
@@ -363,6 +387,154 @@ describe("StoryStageRenderer playback hand-over", () => {
     await flush();
     expect(stage.getSnapshot().caption).toBe("Fox sets off.");
     expect(stage.getSnapshot().action).toBe("move_toward");
+    stage.destroy();
+  });
+});
+
+describe("StoryStageRenderer tap reactions", () => {
+  type Stage = InstanceType<typeof StoryStageRenderer>;
+  const foxOf = (stage: Stage) =>
+    stage.getSnapshot().entities.find((item) => item.id === "fox")!;
+  type Tappable = {
+    eventMode?: string;
+    cursor?: string;
+    hitArea?: { width: number; height: number };
+    emit: (name: string, event?: { button: number }) => void;
+  };
+  const tappable = (stage: Stage, id: string) =>
+    stage.entityObject(id) as unknown as Tappable;
+
+  it("ignores pointer input unless it is interactive", async () => {
+    const stage = new StoryStageRenderer({ scene, world: world() });
+    await stage.ready;
+    const app = pixi.state.apps[0]!;
+    expect(app.options.eventFeatures).toMatchObject({
+      click: false,
+      move: false,
+    });
+    expect(app.stage.eventMode).toBe("none");
+    expect(tappable(stage, "fox").eventMode).toBeUndefined();
+    tappable(stage, "fox").emit("pointertap");
+    expect(foxOf(stage).reaction).toBeUndefined();
+    stage.destroy();
+  });
+
+  it("reacts to a tap with padded targets, a cooldown and no world change", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world([
+        fox,
+        river,
+        { ...castle, bounds: { ...castle.bounds, height: 8 } },
+      ]),
+      interactive: true,
+      width: 350,
+    });
+    await stage.ready;
+    const app = pixi.state.apps[0]!;
+    expect(stage.canvas.style.touchAction).toBe("manipulation");
+    expect(app.renderer.events.autoPreventDefault).toBe(false);
+    const target = tappable(stage, "fox");
+    expect(target.eventMode).toBe("static");
+    expect(target.cursor).toBe("pointer");
+    // 44 CSS px on a 350 px stage is about 126 world units.
+    expect(tappable(stage, "castle").hitArea!.height).toBeCloseTo(
+      (44 * 1000) / 350,
+      3,
+    );
+    const before = stage.restingState();
+
+    target.emit("pointertap");
+    const started = foxOf(stage).reaction;
+    expect(started).toBeDefined();
+    expect(foxOf(stage).reactionCount).toBe(1);
+    // A second tap straight away is ignored, not queued.
+    app.tick(16);
+    target.emit("pointertap");
+    expect(foxOf(stage).reactionCount).toBe(1);
+    // Right-clicks do nothing.
+    for (let frame = 0; frame < 80; frame++) app.tick(16);
+    expect(foxOf(stage).reaction).toBeUndefined();
+    target.emit("pointertap", { button: 2 });
+    expect(foxOf(stage).reactionCount).toBe(1);
+    // After the cooldown a new, different reaction plays.
+    expect(stage.react("fox")).not.toBe(started);
+    expect(foxOf(stage).reactionCount).toBe(2);
+    expect(stage.restingState()).toEqual(before);
+    stage.destroy();
+  });
+
+  it("uses a highlight under reduced motion and still reacts without a canvas", async () => {
+    pixi.state.initResult = "reject";
+    vi.useFakeTimers();
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world(),
+      reducedMotion: true,
+      interactive: true,
+    });
+    await stage.ready;
+    try {
+      expect(stage.react("river")).toBe("highlight");
+      expect(
+        stage.getSnapshot().entities.find((item) => item.id === "river")
+          ?.reaction,
+      ).toBe("highlight");
+      // The fallback clock still ends the reaction.
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(
+        stage.getSnapshot().entities.find((item) => item.id === "river")
+          ?.reaction,
+      ).toBeUndefined();
+    } finally {
+      stage.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not react to a piece still waiting for its reveal", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world(),
+      interactive: true,
+    });
+    await stage.ready;
+    const app = pixi.state.apps[0]!;
+    void stage.playSequence(
+      {
+        ...sequence,
+        sourceEventId: "event-reveal",
+        beats: [
+          {
+            id: "beat-1",
+            narration: "Castle waits.",
+            mood: "curious",
+            action: { type: "focus", entityId: "fox" },
+          },
+          {
+            id: "beat-2",
+            narration: "Castle appears.",
+            mood: "delighted",
+            action: { type: "reveal", entityId: "castle" },
+          },
+        ],
+      },
+      new AbortController().signal,
+    );
+    await flush();
+    app.tick(16);
+    expect(stage.react("castle")).toBeUndefined();
+    // Its (padded) hit area lets taps through to the pieces beneath.
+    expect(tappable(stage, "castle").eventMode).toBe("none");
+    expect(tappable(stage, "fox").eventMode).toBe("static");
+    expect(stage.react("fox")).toBeDefined();
+    // Once revealed it is tappable again.
+    for (let frame = 0; frame < 200; frame++) {
+      app.tick(16);
+      await flush();
+    }
+    expect(tappable(stage, "castle").eventMode).toBe("static");
+    expect(stage.react("castle")).toBeDefined();
     stage.destroy();
   });
 });

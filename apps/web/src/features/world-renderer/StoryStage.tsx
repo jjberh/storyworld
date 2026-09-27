@@ -15,7 +15,7 @@ import {
   type StageRestingState,
   type StageSnapshot,
 } from "./story-stage-renderer";
-import { logicalX } from "./story-playback";
+import { center, logicalX } from "./story-playback";
 
 function restingSnapshot(world: WorldState): StageSnapshot {
   return {
@@ -31,6 +31,10 @@ function restingSnapshot(world: WorldState): StageSnapshot {
       revealState: "visible",
       placement: "source",
       logicalX: logicalX(entity, undefined),
+      centerX: Math.round(center(entity.bounds).x),
+      centerY: Math.round(center(entity.bounds).y),
+      reaction: undefined,
+      reactionCount: 0,
     })),
   };
 }
@@ -77,6 +81,7 @@ export function StoryStage({
       scene: latestScene.current,
       world: latestWorld.current,
       keepCommittedRevealsVisible,
+      interactive: true,
       resting: carried.current,
       width: element.clientWidth || undefined,
     });
@@ -120,6 +125,25 @@ export function StoryStage({
     renderer ? renderer.getSnapshot() : fallback,
   );
 
+  // Glow the piece whose tickle button has keyboard focus. Read from the DOM
+  // on every change rather than trusting focus/blur alone: a rebuilt renderer
+  // needs the glow re-applied, and a button disabled while focused (its piece
+  // hidden for a reveal) may never fire blur.
+  const pieces = useRef<HTMLUListElement>(null);
+  const [focusChanges, setFocusChanges] = useState(0);
+  const noteFocus = () => setFocusChanges((count) => count + 1);
+  useEffect(() => {
+    if (!renderer) return;
+    const active = document.activeElement;
+    renderer.setFocusedEntity(
+      active instanceof HTMLButtonElement &&
+        !active.disabled &&
+        pieces.current?.contains(active)
+        ? active.dataset.tickle
+        : undefined,
+    );
+  }, [renderer, snapshot, focusChanges]);
+
   return (
     <figure className="paper-theater" data-testid="paper-theater">
       <div
@@ -145,7 +169,17 @@ export function StoryStage({
           </p>
         )}
       </div>
-      <ul className="visually-hidden" aria-label="Paper pieces">
+      <ul
+        ref={pieces}
+        // Without a canvas there is no glow to show keyboard focus, so the
+        // buttons themselves become visible.
+        className={
+          snapshot.canvasFailed ? "paper-pieces-fallback" : "visually-hidden"
+        }
+        aria-label="Paper pieces"
+        onFocus={noteFocus}
+        onBlur={noteFocus}
+      >
         {snapshot.entities.map((entity) => (
           <li
             key={entity.id}
@@ -153,8 +187,19 @@ export function StoryStage({
             data-reveal-state={entity.revealState}
             data-placement={entity.placement}
             data-logical-x={entity.logicalX}
+            data-center-x={entity.centerX}
+            data-center-y={entity.centerY}
+            data-reaction={entity.reaction}
+            data-reaction-count={entity.reactionCount}
           >
-            {entity.name}
+            <button
+              type="button"
+              data-tickle={entity.id}
+              disabled={entity.revealState === "hidden"}
+              onClick={() => renderer?.react(entity.id)}
+            >
+              Tickle {entity.name}
+            </button>
           </li>
         ))}
       </ul>

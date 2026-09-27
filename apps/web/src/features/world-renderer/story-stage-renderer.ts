@@ -1,6 +1,7 @@
 import {
   Application,
   Container,
+  type FederatedPointerEvent,
   Graphics,
   ImageSource,
   Rectangle,
@@ -35,6 +36,15 @@ import {
   type Offset,
   type Placement,
 } from "./story-playback";
+import {
+  IDLE_REACTIONS,
+  sampleReaction,
+  settleReaction,
+  tapReaction,
+  touchTarget,
+  type ReactionKind,
+  type ReactionState,
+} from "./touch-reactions";
 
 // The Story Room "paper theater" drawn on one Pixi canvas. Framework-agnostic:
 // it owns its Application, advances every animation from its own ticker clock,
@@ -53,6 +63,13 @@ export type StageEntitySnapshot = {
   revealState: "hidden" | "visible";
   placement: Placement;
   logicalX: number;
+  /** Resting centre in the 1000x600 world, including story movement. */
+  centerX: number;
+  centerY: number;
+  /** The tap reaction playing now, if any. */
+  reaction: ReactionKind | undefined;
+  /** Tap reactions this piece has started. */
+  reactionCount: number;
 };
 
 export type StageSnapshot = {
@@ -73,6 +90,11 @@ export type StoryStageOptions = {
   reducedMotion?: boolean;
   /** Keep a revealed piece visible before its reveal beat plays. */
   keepCommittedRevealsVisible?: boolean;
+  /**
+   * Pieces react to pointer taps. Off by default so an offscreen instance
+   * (for example one recording a story) ignores input.
+   */
+  interactive?: boolean;
   /** Defaults to `window.devicePixelRatio`. */
   resolution?: number;
   /** Initial CSS size of the canvas; defaults to 1000x600. */
@@ -136,6 +158,7 @@ type EntityView = {
   moveTo: Offset;
   moveStartMs: number;
   hidden: number;
+  reactions: ReactionState;
 };
 
 type Waiter = { atMs: number; resolve: () => void };
@@ -190,6 +213,7 @@ export class StoryStageRenderer {
   /** Resolves once Pixi has started (or failed to start). Never rejects. */
   readonly ready: Promise<void>;
   readonly reducedMotion: boolean;
+  readonly interactive: boolean;
 
   private readonly app = new Application();
   private readonly scene: ConfirmedScene;
@@ -219,6 +243,10 @@ export class StoryStageRenderer {
   private readonly rainLayer = new Graphics();
   private readonly confettiLayer = new Graphics();
   private readonly views = new Map<string, EntityView>();
+  /** Reactions for pieces without a view (the canvas failed or is starting). */
+  private readonly detachedReactions = new Map<string, ReactionState>();
+
+  private focusedId: string | undefined;
 
   private caption = INITIAL_CAPTION;
   private action: StoryAction | null = null;
@@ -242,6 +270,7 @@ export class StoryStageRenderer {
     this.world = options.world;
     this.sceneIds = new Set(options.scene.objects.map((object) => object.id));
     this.reducedMotion = options.reducedMotion ?? prefersReducedMotion();
+    this.interactive = options.interactive ?? false;
     this.keepCommittedRevealsVisible =
       options.keepCommittedRevealsVisible ?? false;
     this.size = {
@@ -261,6 +290,12 @@ export class StoryStageRenderer {
         autoDensity: true,
         antialias: true,
         backgroundColor: PAPER,
+        eventFeatures: {
+          move: this.interactive,
+          globalMove: false,
+          click: this.interactive,
+          wheel: false,
+        },
       })
       .then(
         () => {
@@ -354,6 +389,7 @@ export class StoryStageRenderer {
     if (!this.initialized) return;
     this.app.renderer.resize(width, height);
     this.app.stage.scale.set(width / STAGE_WIDTH, height / STAGE_HEIGHT);
+    for (const view of this.views.values()) this.updateHitArea(view);
   }
 
   /** Where the story stands now, to seed a replacement instance. */
@@ -372,6 +408,39 @@ export class StoryStageRenderer {
   /** The display object for one entity, e.g. to attach pointer events. */
   entityObject(id: string): Container | undefined {
     return this.views.get(id)?.container;
+  }
+
+  /**
+   * Plays a tap reaction on one piece, as a tap on the canvas does. Purely
+   * local: the world is not touched. Returns the reaction started, or
+   * undefined when the piece is hidden, unknown, or still in its cooldown.
+   */
+  react(entityId: string): ReactionKind | undefined {
+    if (this.destroyed) return undefined;
+    const view = this.views.get(entityId);
+    const entity =
+      view?.entity ?? this.world.entities.find((item) => item.id === entityId);
+    if (!entity || this.pendingReveal() === entityId) return undefined;
+    const { state, started } = tapReaction(
+      this.reactionState(entityId),
+      entity.kind,
+      view?.seed ?? seedFor(entityId),
+      this.clockMs,
+      this.reducedMotion,
+    );
+    if (!started) return undefined;
+    if (view) view.reactions = state;
+    else this.detachedReactions.set(entityId, state);
+    this.emit();
+    return started;
+  }
+
+  /**
+   * Softly highlights the piece a keyboard user has focused in the host's
+   * accessible mirror (undefined clears it).
+   */
+  setFocusedEntity(entityId: string | undefined) {
+    this.focusedId = entityId;
   }
 
   /** Current time on the stage clock, in milliseconds. */
@@ -420,6 +489,16 @@ export class StoryStageRenderer {
       this.rainLayer,
       this.confettiLayer,
     );
+    if (this.interactive) {
+      // Pixi claims every touch gesture on its canvas by default. Let the
+      // browser keep scrolling and pinch-zooming the page instead: a swipe
+      // becomes a scroll (and never a tap), a quick touch still taps.
+      this.canvas.style.touchAction = "manipulation";
+      this.app.renderer.events.autoPreventDefault = false;
+    } else {
+      stage.eventMode = "none";
+      stage.interactiveChildren = false;
+    }
     this.resize(this.size.width, this.size.height);
     this.drawBackdrop();
     this.syncViews();
@@ -482,6 +561,7 @@ export class StoryStageRenderer {
 
   private advanceClock(deltaMs: number) {
     this.clockMs += deltaMs;
+    this.settleReactions();
     if (!this.waiters.length) return;
     const due = this.waiters.filter((waiter) => waiter.atMs <= this.clockMs);
     if (!due.length) return;
@@ -511,6 +591,29 @@ export class StoryStageRenderer {
   /** Resolves on the next clock tick. */
   private nextFrame(signal: AbortSignal) {
     return this.wait(Number.MIN_VALUE, signal);
+  }
+
+  private reactionState(entityId: string) {
+    return (
+      this.views.get(entityId)?.reactions ??
+      this.detachedReactions.get(entityId) ??
+      IDLE_REACTIONS
+    );
+  }
+
+  /** Ends finished tap reactions and tells the host. */
+  private settleReactions() {
+    let changed = false;
+    const settle = (state: ReactionState) => {
+      const next = settleReaction(state, this.clockMs);
+      if (next !== state) changed = true;
+      return next;
+    };
+    for (const view of this.views.values())
+      view.reactions = settle(view.reactions);
+    for (const [id, state] of this.detachedReactions)
+      this.detachedReactions.set(id, settle(state));
+    if (changed) this.emit();
   }
 
   // ---- state -------------------------------------------------------------
@@ -608,14 +711,23 @@ export class StoryStageRenderer {
       celebrating: !this.reducedMotion && this.action?.type === "celebrate",
       imageStatus: this.imageStatus,
       canvasFailed: this.canvasFailed,
-      entities: this.world.entities.map((entity) => ({
-        id: entity.id,
-        name: entity.name,
-        kind: entity.kind,
-        revealState: pending === entity.id ? "hidden" : "visible",
-        placement: this.placements.get(entity.id) ?? "source",
-        logicalX: logicalX(entity, this.offsets.get(entity.id)),
-      })),
+      entities: this.world.entities.map((entity) => {
+        const offset = this.offsets.get(entity.id);
+        const home = center(entity.bounds);
+        const reactions = this.reactionState(entity.id);
+        return {
+          id: entity.id,
+          name: entity.name,
+          kind: entity.kind,
+          revealState: pending === entity.id ? "hidden" : "visible",
+          placement: this.placements.get(entity.id) ?? "source",
+          logicalX: logicalX(entity, offset),
+          centerX: Math.round(home.x + (offset?.x ?? 0)),
+          centerY: Math.round(home.y + (offset?.y ?? 0)),
+          reaction: reactions.active?.reaction,
+          reactionCount: reactions.taps,
+        };
+      }),
     };
   }
 
@@ -794,12 +906,16 @@ export class StoryStageRenderer {
           moveTo: offset,
           moveStartMs: this.clockMs,
           hidden: this.pendingReveal() === entity.id ? 1 : 0,
+          reactions: this.detachedReactions.get(entity.id) ?? IDLE_REACTIONS,
         };
+        this.detachedReactions.delete(entity.id);
         this.views.set(entity.id, view);
+        this.makeTappable(view);
       }
       view.entity = entity;
       view.motion = idleMotionFor(entity);
       this.drawPiece(view);
+      this.updateHitArea(view);
     }
     for (const [id, view] of this.views) {
       if (seen.has(id)) continue;
@@ -807,6 +923,8 @@ export class StoryStageRenderer {
       view.container.destroy();
       this.views.delete(id);
     }
+    for (const id of this.detachedReactions.keys())
+      if (!seen.has(id)) this.detachedReactions.delete(id);
     // Scenery below, travellers above; world order within each layer.
     this.entityLayer.removeChildren();
     const ordered = [...this.world.entities].sort(
@@ -817,6 +935,34 @@ export class StoryStageRenderer {
       if (view) this.entityLayer.addChild(view.container);
     }
     this.drawMattes();
+  }
+
+  // ---- input -------------------------------------------------------------
+
+  private makeTappable(view: EntityView) {
+    if (!this.interactive) return;
+    const { container } = view;
+    container.eventMode = "static";
+    container.cursor = "pointer";
+    // Only the padded hit area counts; the glow and paper edge do not.
+    container.interactiveChildren = false;
+    const id = view.entity.id;
+    container.on("pointertap", (event: FederatedPointerEvent) => {
+      if (event.button > 0) return;
+      this.react(id);
+    });
+  }
+
+  /** A padded rectangle so thin drawings are still easy to tap. */
+  private updateHitArea(view: EntityView) {
+    if (!this.interactive) return;
+    const rect = touchTarget(view.entity.bounds, this.size.width / STAGE_WIDTH);
+    view.container.hitArea = new Rectangle(
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height,
+    );
   }
 
   // ---- per-frame ---------------------------------------------------------
@@ -856,7 +1002,19 @@ export class StoryStageRenderer {
         this.reducedMotion ? 0 : REVEAL_FADE_MS,
       );
       const hiddenScale = 1 - 0.18 * view.hidden;
-      const pose = combinePoses(idle, pulse?.pose ?? RESTING_POSE);
+      // A piece waiting for its reveal must not swallow taps meant for the
+      // pieces drawn beneath it.
+      if (this.interactive)
+        container.eventMode = pending === entity.id ? "none" : "static";
+      const active = view.reactions.active;
+      const reaction = active
+        ? sampleReaction(active.reaction, now - active.startMs, entity.bounds)
+        : undefined;
+      const pose = combinePoses(
+        idle,
+        pulse?.pose ?? RESTING_POSE,
+        reaction?.pose ?? RESTING_POSE,
+      );
       container.position.set(
         home.x + offset.x + pose.dx,
         home.y + offset.y + pose.dy,
@@ -864,7 +1022,12 @@ export class StoryStageRenderer {
       container.scale.set(pose.scaleX * hiddenScale, pose.scaleY * hiddenScale);
       container.rotation = pose.rotation;
       container.alpha = (1 - view.hidden) * (pulse?.alpha ?? 1);
-      if (view.glow) view.glow.alpha = pulse?.glow ?? 0;
+      if (view.glow)
+        view.glow.alpha = Math.max(
+          pulse?.glow ?? 0,
+          reaction?.glow ?? 0,
+          this.focusedId === entity.id ? 0.55 : 0,
+        );
     }
 
     this.drawRain(now);
