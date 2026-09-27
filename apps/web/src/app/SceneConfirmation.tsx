@@ -1,7 +1,9 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import {
   confirmedSceneSchema,
-  entitySchema,
+  defaultPropertiesFor,
+  entityRoleSchema,
+  type EntityRole,
   type SceneCandidate,
   type SceneInterpretationResponse,
   type StoryDocument,
@@ -21,13 +23,12 @@ import {
   type CreationAttempt,
 } from "./scene-creation";
 
-const kindLabels: Record<SceneCandidate["kind"], string> = {
+const roleLabels: Record<EntityRole, string> = {
   character: "Main character",
-  castle: "A place to visit",
-  river: "A river",
-  bridge: "A bridge",
-  cloud: "A cloud",
-  shelter: "A cozy place",
+  goal: "A place to reach",
+  obstacle: "Something in the way",
+  helper: "A helper",
+  scenery: "Part of the scene",
 };
 
 export function SceneConfirmation({
@@ -123,7 +124,7 @@ export function SceneConfirmation({
   }
 
   // No relationship is inferred from a detected river: the child never
-  // confirmed that the character fears it, so no `fearedRiverId` is sent.
+  // confirmed that the character fears it, so no `fearedObstacleId` is sent.
   function freezeAttempt(): CreationAttempt | undefined {
     if (!allChecked) {
       setError("Give every picture part a quick check first.");
@@ -138,12 +139,16 @@ export function SceneConfirmation({
       mode: interpretation.mode,
       objects,
       characterId:
-        objects.find((object) => object.kind === "character")?.id ?? "",
-      goalId: objects.some(
-        (object) => object.id === interpretation.goalCandidateId,
-      )
-        ? interpretation.goalCandidateId
-        : undefined,
+        objects.find((object) => object.role === "character")?.id ?? "",
+      // The detected goal if it is still a place to reach, else the first
+      // object the child marked as one.
+      goalId: (
+        objects.find(
+          (object) =>
+            object.id === interpretation.goalCandidateId &&
+            object.role === "goal",
+        ) ?? objects.find((object) => object.role === "goal")
+      )?.id,
       openingNarration: interpretation.openingNarration,
       moodHints: interpretation.moodHints,
     });
@@ -241,7 +246,15 @@ export function SceneConfirmation({
               const id = "object-" + crypto.randomUUID();
               setObjects((current) => [
                 ...current,
-                { id, name: "", kind: "shelter", confidence: 1, imageBounds },
+                {
+                  id,
+                  name: "",
+                  role: "scenery",
+                  description: "",
+                  properties: defaultPropertiesFor("scenery"),
+                  confidence: 1,
+                  imageBounds,
+                },
               ]);
               setSelected(id);
               setAdding(false);
@@ -346,16 +359,20 @@ export function SceneConfirmation({
                   What kind of thing is it?
                   <select
                     aria-label="What kind of thing is it?"
-                    value={selectedObject.kind}
-                    onChange={(event) =>
+                    value={selectedObject.role}
+                    onChange={(event) => {
+                      // A retyped object takes the new role's defaults, so
+                      // "Something in the way" really blocks the path.
+                      const role = entityRoleSchema.parse(event.target.value);
                       update(selectedObject.id, {
-                        kind: entitySchema.shape.kind.parse(event.target.value),
-                      })
-                    }
+                        role,
+                        properties: defaultPropertiesFor(role),
+                      });
+                    }}
                   >
-                    {entitySchema.shape.kind.options.map((kind) => (
-                      <option key={kind} value={kind}>
-                        {kindLabels[kind]}
+                    {entityRoleSchema.options.map((role) => (
+                      <option key={role} value={role}>
+                        {roleLabels[role]}
                       </option>
                     ))}
                   </select>

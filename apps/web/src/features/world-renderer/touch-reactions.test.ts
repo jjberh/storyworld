@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EntityKind } from "@storyworld/contracts/model";
+import type { Entity } from "@storyworld/contracts/model";
 import {
   IDLE_REACTIONS,
   MIN_TOUCH_TARGET_PX,
@@ -15,14 +15,26 @@ import {
   type TouchReaction,
 } from "./touch-reactions";
 
-const kinds: EntityKind[] = [
-  "character",
-  "cloud",
-  "castle",
-  "shelter",
-  "river",
-  "bridge",
-];
+type Piece =
+  | "character"
+  | "cloud"
+  | "castle"
+  | "shelter"
+  | "river"
+  | "bridge"
+  | "bird"
+  | "catapult";
+const pieces: Record<Piece, Pick<Entity, "role" | "properties">> = {
+  character: { role: "character", properties: ["moves"] },
+  cloud: { role: "scenery", properties: ["weather"] },
+  castle: { role: "goal", properties: ["goal"] },
+  shelter: { role: "helper", properties: ["shelters"] },
+  river: { role: "obstacle", properties: ["blocks"] },
+  bridge: { role: "helper", properties: ["carries"] },
+  bird: { role: "scenery", properties: ["flies"] },
+  catapult: { role: "helper", properties: ["launches"] },
+};
+const kinds = Object.keys(pieces) as Piece[];
 const allReactions: ReactionKind[] = [
   "giggle",
   "jump",
@@ -34,7 +46,7 @@ const size = { width: 120, height: 120 };
 
 describe("reactionsFor", () => {
   it("lets characters do everything", () => {
-    expect(reactionsFor("character")).toEqual([
+    expect(reactionsFor(pieces.character)).toEqual([
       "giggle",
       "jump",
       "spin",
@@ -42,24 +54,21 @@ describe("reactionsFor", () => {
     ]);
   });
 
-  it.each<EntityKind>(["river", "bridge"])(
-    "keeps a %s on the ground",
-    (kind) => {
-      expect(reactionsFor(kind)).not.toContain("jump");
-      expect(reactionsFor(kind)).not.toContain("spin");
-    },
-  );
+  it.each<Piece>(["river", "bridge"])("keeps a %s on the ground", (kind) => {
+    expect(reactionsFor(pieces[kind])).not.toContain("jump");
+    expect(reactionsFor(pieces[kind])).not.toContain("spin");
+  });
 
   it.each(kinds)("gives a %s at least two reactions", (kind) => {
-    expect(reactionsFor(kind).length).toBeGreaterThanOrEqual(2);
+    expect(reactionsFor(pieces[kind]).length).toBeGreaterThanOrEqual(2);
   });
 });
 
 describe("chooseReaction", () => {
   it("is deterministic for a seed and tap count", () => {
     for (let tap = 0; tap < 10; tap++)
-      expect(chooseReaction("character", 0.37, tap)).toBe(
-        chooseReaction("character", 0.37, tap),
+      expect(chooseReaction(pieces.character, 0.37, tap)).toBe(
+        chooseReaction(pieces.character, 0.37, tap),
       );
   });
 
@@ -68,20 +77,20 @@ describe("chooseReaction", () => {
       const seen = new Set<TouchReaction>();
       let previous: TouchReaction | undefined;
       for (let tap = 0; tap < 40; tap++) {
-        const next = chooseReaction(kind, 0.61, tap, previous);
-        expect(reactionsFor(kind)).toContain(next);
+        const next = chooseReaction(pieces[kind], 0.61, tap, previous);
+        expect(reactionsFor(pieces[kind])).toContain(next);
         if (previous) expect(next).not.toBe(previous);
         seen.add(next);
         previous = next;
       }
-      expect(seen.size).toBe(reactionsFor(kind).length);
+      expect(seen.size).toBe(reactionsFor(pieces[kind]).length);
     }
   });
 
   it("differs between pieces with different seeds", () => {
     const first = (seed: number) =>
       Array.from({ length: 6 }, (_, tap) =>
-        chooseReaction("character", seed, tap),
+        chooseReaction(pieces.character, seed, tap),
       ).join();
     expect(first(0.1)).not.toBe(first(0.7));
   });
@@ -91,7 +100,7 @@ describe("tapReaction", () => {
   it("starts a reaction straight away", () => {
     const { state, started } = tapReaction(
       IDLE_REACTIONS,
-      "character",
+      pieces.character,
       0.2,
       1000,
       false,
@@ -102,14 +111,14 @@ describe("tapReaction", () => {
   });
 
   it("ignores taps during a reaction and its cooldown, then accepts one", () => {
-    const first = tapReaction(IDLE_REACTIONS, "character", 0.2, 0, false);
+    const first = tapReaction(IDLE_REACTIONS, pieces.character, 0.2, 0, false);
     const duration = reactionDurationMs(first.started!);
-    const during = tapReaction(first.state, "character", 0.2, 50, false);
+    const during = tapReaction(first.state, pieces.character, 0.2, 50, false);
     expect(during.started).toBeUndefined();
     expect(during.state).toBe(first.state);
     const cooling = tapReaction(
       first.state,
-      "character",
+      pieces.character,
       0.2,
       duration + REACTION_COOLDOWN_MS - 1,
       false,
@@ -117,7 +126,7 @@ describe("tapReaction", () => {
     expect(cooling.started).toBeUndefined();
     const later = tapReaction(
       settleReaction(first.state, duration + REACTION_COOLDOWN_MS),
-      "character",
+      pieces.character,
       0.2,
       duration + REACTION_COOLDOWN_MS,
       false,
@@ -130,7 +139,7 @@ describe("tapReaction", () => {
   it("uses a highlight under reduced motion", () => {
     const { started, state } = tapReaction(
       IDLE_REACTIONS,
-      "character",
+      pieces.character,
       0.2,
       0,
       true,
@@ -142,7 +151,13 @@ describe("tapReaction", () => {
 
 describe("settleReaction", () => {
   it("keeps a playing reaction and drops a finished one", () => {
-    const { state } = tapReaction(IDLE_REACTIONS, "river", 0.5, 100, false);
+    const { state } = tapReaction(
+      IDLE_REACTIONS,
+      pieces.river,
+      0.5,
+      100,
+      false,
+    );
     const duration = reactionDurationMs(state.active!.reaction);
     expect(settleReaction(state, 100 + duration - 1)).toBe(state);
     expect(settleReaction(state, 100 + duration).active).toBeUndefined();

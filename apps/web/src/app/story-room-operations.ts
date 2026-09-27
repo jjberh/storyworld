@@ -1,46 +1,40 @@
-import type {
-  Entity,
-  WorldOperation,
-  WorldState,
-} from "@storyworld/contracts/model";
+import type { WorldOperation, WorldState } from "@storyworld/contracts/model";
+import {
+  blockingObstacle,
+  isBlocker,
+  presetTraits,
+} from "@storyworld/contracts/entity-traits";
 
-function centerX(entity: Entity) {
-  return entity.bounds.x + entity.bounds.width / 2;
-}
-
-function blockingRiver(world: WorldState) {
-  const character = world.entities.find(
-    (entity) => entity.id === world.goal?.characterId,
-  );
-  const target = world.entities.find(
-    (entity) => entity.id === world.goal?.targetId,
-  );
-  const rivers = world.entities.filter((entity) => entity.kind === "river");
-  if (!character || !target) return rivers[0];
-  const start = centerX(character);
-  const end = centerX(target);
+/**
+ * The obstacle a sample bridge should span: the one closing the goal route,
+ * else (with no goal, or nothing on the route) the first thing that blocks.
+ */
+function obstacleToSpan(world: WorldState) {
   return (
-    rivers.find(
-      (river) =>
-        Math.min(start, end) < river.bounds.x &&
-        Math.max(start, end) > river.bounds.x + river.bounds.width,
-    ) ?? rivers[0]
+    blockingObstacle(world) ??
+    world.entities.find(
+      (entity) =>
+        isBlocker(entity) &&
+        entity.id !== world.goal?.characterId &&
+        entity.id !== world.goal?.targetId,
+    )
   );
 }
 
-/** Creates a bounded bridge that spans the committed river geometry. */
+/** Creates a bounded bridge that spans the committed blocker geometry. */
 export function bridgeOperationForWorld(
   world: WorldState,
   id = `bridge-${crypto.randomUUID()}`,
 ): WorldOperation {
-  const river = blockingRiver(world);
+  const river = obstacleToSpan(world);
   if (!river)
     return {
       type: "CREATE_ENTITY",
       entity: {
         id,
-        kind: "bridge",
+        ...presetTraits("bridge"),
         name: "Paper bridge",
+        description: "A paper bridge laid across the way.",
         bounds: { x: 405, y: 320, width: 190, height: 55 },
       },
     };
@@ -59,8 +53,9 @@ export function bridgeOperationForWorld(
     type: "CREATE_ENTITY",
     entity: {
       id,
-      kind: "bridge",
+      ...presetTraits("bridge"),
       name: "Paper bridge",
+      description: "A paper bridge laid across the way.",
       bounds: { x: left, y, width: right - left, height },
     },
   };

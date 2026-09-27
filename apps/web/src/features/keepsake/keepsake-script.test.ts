@@ -25,31 +25,41 @@ import {
 
 const fox: Entity = {
   id: "fox",
-  kind: "character",
+  role: "character",
+  description: "",
+  properties: ["moves"],
   name: "Fox",
   bounds: { x: 100, y: 120, width: 200, height: 120 },
 };
 const river: Entity = {
   id: "river",
-  kind: "river",
+  role: "obstacle",
+  description: "",
+  properties: ["blocks"],
   name: "River",
   bounds: { x: 450, y: 30, width: 120, height: 540 },
 };
 const castle: Entity = {
   id: "castle",
-  kind: "castle",
+  role: "goal",
+  description: "",
+  properties: ["goal"],
   name: "Castle",
   bounds: { x: 700, y: 120, width: 200, height: 120 },
 };
 const bridge: Entity = {
   id: "bridge",
-  kind: "bridge",
+  role: "helper",
+  description: "",
+  properties: ["carries"],
   name: "Bridge",
   bounds: { x: 430, y: 270, width: 160, height: 60 },
 };
 const cloud: Entity = {
   id: "cloud",
-  kind: "cloud",
+  role: "scenery",
+  description: "",
+  properties: ["weather"],
   name: "Cloud",
   bounds: { x: 600, y: 20, width: 160, height: 80 },
 };

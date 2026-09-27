@@ -9,7 +9,8 @@ import {
   type StorySequence,
 } from "./story-beat";
 
-// Nova's world plus a cloud, so every semantic role has an entity to point at.
+// Nova's world plus a cloud, a flying dragon, a boat, a catapult and a wall,
+// so every semantic role and property has an entity to point at.
 // These ids exist only in this test; the contract itself hardcodes none.
 const world: WorldState = (() => {
   const base = initialWorld("story-test");
@@ -20,9 +21,43 @@ const world: WorldState = (() => {
       ...base.entities,
       {
         id: "cloud",
-        kind: "cloud",
+        role: "scenery",
+        description: "",
+        properties: ["weather"],
         name: "Storm cloud",
         bounds: { x: 600, y: 60, width: 150, height: 80 },
+      },
+      {
+        id: "dragon",
+        role: "helper",
+        description: "",
+        properties: ["flies", "carries"],
+        name: "Dragon",
+        bounds: { x: 200, y: 60, width: 120, height: 80 },
+      },
+      {
+        id: "boat",
+        role: "helper",
+        description: "",
+        properties: ["floats", "carries"],
+        name: "Boat",
+        bounds: { x: 430, y: 400, width: 100, height: 50 },
+      },
+      {
+        id: "catapult",
+        role: "helper",
+        description: "",
+        properties: ["launches"],
+        name: "Catapult",
+        bounds: { x: 300, y: 400, width: 80, height: 60 },
+      },
+      {
+        id: "wall",
+        role: "obstacle",
+        description: "",
+        properties: ["blocks"],
+        name: "Stone wall",
+        bounds: { x: 650, y: 200, width: 40, height: 300 },
       },
     ],
   };
@@ -57,6 +92,8 @@ function deepFreeze<T>(value: T): T {
   }
   return value;
 }
+const accepted = (input: unknown) =>
+  validateStorySequenceForWorld(input, world).ok;
 const errorsFor = (input: unknown) => {
   const result = validateStorySequenceForWorld(input, world);
   if (result.ok) throw new Error("Expected the sequence to be rejected.");
@@ -301,7 +338,9 @@ describe("story sequence references against a world", () => {
           }),
         ]),
       ),
-    ).toEqual(['Beat "b1": causeEntityId "castle" must be a cloud.']);
+    ).toEqual([
+      'Beat "b1": causeEntityId "castle" must be something that changes the weather.',
+    ]);
   });
 
   it("enforces the bounded semantic roles", () => {
@@ -328,8 +367,231 @@ describe("story sequence references against a world", () => {
     ).toEqual([
       'Beat "m": entityId "river" must be a character.',
       'Beat "b": entityId "castle" must be a character.',
-      'Beat "o": obstacleId "castle" must be a river.',
+      'Beat "o": obstacleId "castle" must be something that blocks.',
     ]);
+  });
+
+  it("accepts any obstacle that blocks, not only a river", () => {
+    expect(
+      accepted(
+        sequence([
+          beat("w", {
+            type: "blocked_by",
+            entityId: "nova",
+            obstacleId: "wall",
+          }),
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  describe("richer actions", () => {
+    it("accepts each new action when roles and properties fit", () => {
+      const result = validateStorySequenceForWorld(
+        sequence([
+          beat("f", {
+            type: "fly_over",
+            entityId: "dragon",
+            obstacleId: "river",
+          }),
+          beat("r", {
+            type: "ride",
+            entityId: "nova",
+            carrierId: "boat",
+            targetId: "castle",
+          }),
+          beat("l", {
+            type: "launch",
+            entityId: "nova",
+            launcherId: "catapult",
+            targetId: "castle",
+          }),
+        ]),
+        world,
+      );
+      expect(result.ok).toBe(true);
+      expect(
+        accepted(
+          sequence([
+            beat("r", { type: "ride", entityId: "nova", carrierId: "dragon" }),
+            beat("l", {
+              type: "launch",
+              entityId: "boat",
+              launcherId: "catapult",
+            }),
+            beat("s", {
+              type: "splash",
+              entityId: "nova",
+              obstacleId: "river",
+            }),
+          ]),
+        ),
+      ).toBe(true);
+      for (const reaction of ["surprised", "scared", "happy"] as const)
+        expect(
+          accepted(
+            sequence([
+              beat("x", {
+                type: "react",
+                entityId: "nova",
+                causeId: "cloud",
+                reaction,
+              }),
+            ]),
+          ),
+        ).toBe(true);
+    });
+
+    it("rejects a fly_over by a non-flyer or over something that does not block", () => {
+      expect(
+        errorsFor(
+          sequence([
+            beat("a", {
+              type: "fly_over",
+              entityId: "nova",
+              obstacleId: "river",
+            }),
+            beat("b", {
+              type: "fly_over",
+              entityId: "dragon",
+              obstacleId: "castle",
+            }),
+            beat("c", {
+              type: "fly_over",
+              entityId: "ghost",
+              obstacleId: "river",
+            }),
+          ]),
+        ),
+      ).toEqual([
+        'Beat "a": entityId "nova" must be something that flies.',
+        'Beat "b": obstacleId "castle" must be something that blocks.',
+        'Beat "c": entityId "ghost" is not in this world.',
+      ]);
+    });
+
+    it("rejects a ride that is not a character on a carrier", () => {
+      expect(
+        errorsFor(
+          sequence([
+            beat("a", { type: "ride", entityId: "boat", carrierId: "dragon" }),
+            beat("b", {
+              type: "ride",
+              entityId: "nova",
+              carrierId: "catapult",
+            }),
+            beat("c", {
+              type: "ride",
+              entityId: "nova",
+              carrierId: "boat",
+              targetId: "ghost",
+            }),
+          ]),
+        ),
+      ).toEqual([
+        'Beat "a": entityId "boat" must be a character.',
+        'Beat "b": carrierId "catapult" must be something that carries.',
+        'Beat "c": targetId "ghost" is not in this world.',
+      ]);
+    });
+
+    it("rejects a launch without a launcher or with missing pieces", () => {
+      expect(
+        errorsFor(
+          sequence([
+            beat("a", { type: "launch", entityId: "nova", launcherId: "boat" }),
+            beat("b", {
+              type: "launch",
+              entityId: "ghost",
+              launcherId: "catapult",
+            }),
+            beat("c", {
+              type: "launch",
+              entityId: "nova",
+              launcherId: "catapult",
+              targetId: "ghost",
+            }),
+          ]),
+        ),
+      ).toEqual([
+        'Beat "a": launcherId "boat" must be something that launches.',
+        'Beat "b": entityId "ghost" is not in this world.',
+        'Beat "c": targetId "ghost" is not in this world.',
+      ]);
+    });
+
+    it("rejects a splash that is not a character into something that blocks", () => {
+      expect(
+        errorsFor(
+          sequence([
+            beat("a", {
+              type: "splash",
+              entityId: "boat",
+              obstacleId: "river",
+            }),
+            beat("b", { type: "splash", entityId: "nova", obstacleId: "boat" }),
+          ]),
+        ),
+      ).toEqual([
+        'Beat "a": entityId "boat" must be a character.',
+        'Beat "b": obstacleId "boat" must be something that blocks.',
+      ]);
+    });
+
+    it("rejects a reaction by a non-character, to a missing cause, or to itself", () => {
+      expect(
+        errorsFor(
+          sequence([
+            beat("a", {
+              type: "react",
+              entityId: "castle",
+              causeId: "cloud",
+              reaction: "happy",
+            }),
+            beat("b", {
+              type: "react",
+              entityId: "nova",
+              causeId: "ghost",
+              reaction: "scared",
+            }),
+          ]),
+        ),
+      ).toEqual([
+        'Beat "a": entityId "castle" must be a character.',
+        'Beat "b": causeId "ghost" is not in this world.',
+      ]);
+      expect(
+        storyActionSchema.safeParse({
+          type: "react",
+          entityId: "nova",
+          causeId: "nova",
+          reaction: "happy",
+        }).success,
+      ).toBe(false);
+      expect(
+        storyActionSchema.safeParse({
+          type: "react",
+          entityId: "nova",
+          causeId: "cloud",
+          reaction: "angry",
+        }).success,
+      ).toBe(false);
+    });
+
+    it("keeps the new actions strict and complete", () => {
+      for (const action of [
+        { type: "fly_over", entityId: "dragon", obstacleId: "river", x: 1 },
+        { type: "ride", entityId: "nova", carrierId: "boat", bounds: {} },
+        { type: "launch", entityId: "nova", launcherId: "catapult", speed: 9 },
+        { type: "splash", entityId: "nova", obstacleId: "river", depth: 2 },
+        { type: "fly_over", entityId: "dragon" },
+        { type: "ride", entityId: "nova" },
+        { type: "launch", entityId: "nova" },
+        { type: "splash", entityId: "nova" },
+        { type: "react", entityId: "nova", causeId: "cloud" },
+      ])
+        expect(storyActionSchema.safeParse(action).success).toBe(false);
+    });
   });
 
   it("reports every problem in a sequence, not just the first", () => {
@@ -353,13 +615,17 @@ describe("story sequence references against a world", () => {
       entities: [
         {
           id: "fox-1",
-          kind: "character",
+          role: "character",
+          description: "",
+          properties: ["moves"],
           name: "Fox",
           bounds: { x: 10, y: 10, width: 50, height: 50 },
         },
         {
           id: "creek-1",
-          kind: "river",
+          role: "obstacle",
+          description: "",
+          properties: ["blocks"],
           name: "Creek",
           bounds: { x: 300, y: 0, width: 80, height: 600 },
         },

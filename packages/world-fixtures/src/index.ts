@@ -15,6 +15,7 @@ import {
   type ConfirmedScene,
 } from "@storyworld/contracts";
 import { worldFromScene } from "@storyworld/contracts/scene";
+import { presetTraits } from "@storyworld/contracts/entity-traits";
 export function bridgeOperation(
   id = "bridge-" + crypto.randomUUID(),
 ): WorldOperation {
@@ -22,8 +23,9 @@ export function bridgeOperation(
     type: "CREATE_ENTITY",
     entity: {
       id,
-      kind: "bridge",
+      ...presetTraits("bridge"),
       name: "Bridge",
+      description: "A sturdy wooden bridge.",
       bounds: { x: 385, y: 330, width: 190, height: 55 },
     },
   };
@@ -33,8 +35,9 @@ export function cloudOperation(): WorldOperation {
     type: "CREATE_ENTITY",
     entity: {
       id: "cloud-" + crypto.randomUUID(),
-      kind: "cloud",
+      ...presetTraits("cloud"),
       name: "Storm cloud",
+      description: "A grey cloud full of rain.",
       bounds: { x: 580, y: 80, width: 150, height: 75 },
     },
   };

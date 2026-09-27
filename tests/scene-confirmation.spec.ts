@@ -7,14 +7,18 @@ const response = {
     {
       id: "fox",
       name: "Fox",
-      kind: "character",
+      role: "character",
+      description: "",
+      properties: ["moves"],
       confidence: 0.6,
       imageBounds: { x: 0.1, y: 0.2, width: 0.2, height: 0.2 },
     },
     {
       id: "castle",
       name: "Castle",
-      kind: "castle",
+      role: "goal",
+      description: "",
+      properties: ["goal"],
       confidence: 1,
       imageBounds: { x: 0.7, y: 0.2, width: 0.2, height: 0.2 },
     },
@@ -130,7 +134,7 @@ test("adds a missed object by marking its region and changing its type", async (
   await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
   await page.mouse.up();
   await page.getByLabel("What should we call it?").fill("River");
-  await page.getByLabel("What kind of thing is it?").selectOption("river");
+  await page.getByLabel("What kind of thing is it?").selectOption("obstacle");
   await page.getByRole("button", { name: "Yes, that's right!" }).click();
   await page.getByRole("button", { name: "Yes, that's right!" }).click();
   await page.getByRole("button", { name: "Yes, that's right!" }).click();

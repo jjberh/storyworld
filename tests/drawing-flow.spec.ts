@@ -25,7 +25,9 @@ const response = {
         entity: {
           id: "test-bridge",
           name: "Bridge",
-          kind: "bridge",
+          role: "helper",
+          description: "",
+          properties: ["carries"],
           bounds: { x: 385, y: 330, width: 190, height: 55 },
         },
       },

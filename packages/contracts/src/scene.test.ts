@@ -14,7 +14,9 @@ const scene: ConfirmedScene = {
     {
       id: "fox",
       name: "Fox",
-      kind: "character",
+      role: "character",
+      description: "",
+      properties: ["moves"],
       confidence: 1,
       imageBounds: { x: 0.1, y: 0.2, width: 0.2, height: 0.2 },
     },
@@ -30,7 +32,9 @@ describe("confirmed scene initialization", () => {
       {
         id: "fox",
         name: "Fox",
-        kind: "character",
+        role: "character",
+        description: "",
+        properties: ["moves"],
         bounds: { x: 100, y: 120, width: 200, height: 120 },
       },
     ]);
@@ -41,7 +45,7 @@ describe("confirmed scene initialization", () => {
   it("rejects invalid references, duplicate IDs, extra characters and out-of-image boxes", () => {
     for (const invalid of [
       { ...scene, goalId: "fox" },
-      { ...scene, fearedRiverId: "missing" },
+      { ...scene, fearedObstacleId: "missing" },
       { ...scene, objects: [...scene.objects, scene.objects[0]] },
       {
         ...scene,
@@ -67,14 +71,18 @@ describe("confirmed scene initialization", () => {
         {
           id: "castle",
           name: "Castle",
-          kind: "castle",
+          role: "goal",
+          description: "",
+          properties: ["goal"],
           confidence: 1,
           imageBounds: { x: 0.75, y: 0.2, width: 0.15, height: 0.3 },
         },
         {
           id: "creek",
           name: "Creek",
-          kind: "river",
+          role: "obstacle",
+          description: "",
+          properties: ["blocks"],
           confidence: 1,
           imageBounds: { x: 0.45, y: 0, width: 0.1, height: 1 },
         },
@@ -95,7 +103,7 @@ describe("confirmed scene initialization", () => {
     it("creates exactly one afraid_of rule for an explicit valid river", () => {
       const world = worldFromScene("fox-world", {
         ...withRiver,
-        fearedRiverId: "creek",
+        fearedObstacleId: "creek",
       });
       expect(world.rules).toEqual([
         {
@@ -108,19 +116,19 @@ describe("confirmed scene initialization", () => {
     });
 
     it("rejects a fear reference that is missing or not a river", () => {
-      for (const fearedRiverId of ["missing", "fox", "castle"])
+      for (const fearedObstacleId of ["missing", "fox", "castle"])
         expect(
-          confirmedSceneSchema.safeParse({ ...withRiver, fearedRiverId })
+          confirmedSceneSchema.safeParse({ ...withRiver, fearedObstacleId })
             .success,
         ).toBe(false);
       expect(
-        confirmedSceneSchema.safeParse({ ...scene, fearedRiverId: "fox" })
+        confirmedSceneSchema.safeParse({ ...scene, fearedObstacleId: "fox" })
           .success,
       ).toBe(false);
     });
 
     it("blocks the route from geometry alone, independent of fear rules", () => {
-      const feared = { ...withRiver, fearedRiverId: "creek" };
+      const feared = { ...withRiver, fearedObstacleId: "creek" };
       expect(worldFromScene("fox-world", withRiver).pathStatus).toBe("blocked");
       expect(worldFromScene("fox-world", feared).pathStatus).toBe("blocked");
     });

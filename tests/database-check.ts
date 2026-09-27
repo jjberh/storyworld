@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { DbConnection } from "../apps/web/src/module_bindings";
 import { bridgeOperation, cloudOperation } from "@storyworld/world-fixtures";
-import type { ConfirmedScene } from "@storyworld/contracts";
+import { SCHEMA_VERSION, type ConfirmedScene } from "@storyworld/contracts";
 const uri = process.env.TEST_DB_URI ?? "http://127.0.0.1:3010";
 const database = process.env.TEST_DB_NAME ?? "storyworld-foundation-check";
 if (!new URL(uri).hostname.match(/^(127\.0\.0\.1|localhost)$/))
@@ -38,6 +38,11 @@ const director = await connect(),
   guest = await connect();
 const worldId = "verify-" + Date.now();
 try {
+  // Connecting upserts the schema row, so a database republished over older
+  // data (without --delete-data) still reports this module's version.
+  await until(
+    () => guest.db.metadata.id.find("schema")?.schemaVersion === SCHEMA_VERSION,
+  );
   const sceneId = "scene-" + Date.now();
   const scene: ConfirmedScene = {
     document: {
@@ -50,7 +55,9 @@ try {
       {
         id: "fox",
         name: "Fox",
-        kind: "character",
+        role: "character",
+        description: "",
+        properties: ["moves"],
         confidence: 1,
         imageBounds: { x: 0.1, y: 0.2, width: 0.2, height: 0.2 },
       },
@@ -115,7 +122,9 @@ try {
       type: "CREATE_ENTITY",
       entity: {
         id: "near-miss-bridge",
-        kind: "bridge",
+        role: "helper",
+        description: "",
+        properties: ["carries"],
         name: "Near miss bridge",
         bounds: { x: 420, y: 330, width: 119, height: 50 },
       },
@@ -124,7 +133,10 @@ try {
   await until(() => guest.db.world.id.find(worldId)?.revision === 1);
   const nearMiss = guest.db.worldEvent.id.find(worldId + ":1")!;
   assert.equal(JSON.parse(nearMiss.snapshot).pathStatus, "blocked");
-  assert.match(nearMiss.summary, /river still blocks the route/);
+  assert.equal(
+    nearMiss.summary,
+    "Near miss bridge added · River still blocks the route",
+  );
   await guest.reducers.submitProposal({
     worldId,
     proposalId: worldId + "-proposal",
@@ -204,7 +216,7 @@ try {
   assert.equal(restored.pathStatus, "blocked");
   assert.equal(restored.weather, "clear");
   console.log(
-    "PASS: independent clients synchronize; unauthorized/stale edits rejected; proposal approval/rejection, idempotency, and rewind verified.",
+    "PASS: schema version stamped; independent clients synchronize; unauthorized/stale edits rejected; proposal approval/rejection, idempotency, and rewind verified.",
   );
 } finally {
   director.disconnect();

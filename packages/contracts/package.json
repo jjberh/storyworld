@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./entity-traits": "./src/entity-traits.ts",
     "./model": "./src/model.ts",
     "./simulation": "./src/simulation.ts",
     "./scene": "./src/scene.ts",

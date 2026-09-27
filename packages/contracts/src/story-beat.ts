@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { EntityKind, WorldState } from "./model";
+import type { EntityProperty, EntityRole, WorldState } from "./model";
 import { storyMoodSchema } from "./story-schema";
 
 // Presentation-only language shared by Gemini and the renderer. A beat never
@@ -34,6 +34,53 @@ export const storyActionSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("celebrate"), entityId }).strict(),
+  // Something that flies passes over something that blocks.
+  z
+    .object({
+      type: z.literal("fly_over"),
+      entityId,
+      obstacleId: entityId,
+    })
+    .strict(),
+  // The character is carried by a helper, optionally toward a target.
+  z
+    .object({
+      type: z.literal("ride"),
+      entityId,
+      carrierId: entityId,
+      targetId: entityId.optional(),
+    })
+    .strict(),
+  // Something is thrown or bounced by a launcher, optionally toward a target.
+  z
+    .object({
+      type: z.literal("launch"),
+      entityId,
+      launcherId: entityId,
+      targetId: entityId.optional(),
+    })
+    .strict(),
+  // A funny failure: the character tumbles into something that blocks.
+  z
+    .object({
+      type: z.literal("splash"),
+      entityId,
+      obstacleId: entityId,
+    })
+    .strict(),
+  // A character's short reaction to something new.
+  z
+    .object({
+      type: z.literal("react"),
+      entityId,
+      causeId: entityId,
+      reaction: z.enum(["surprised", "scared", "happy"]),
+    })
+    .strict()
+    .refine((action) => action.causeId !== action.entityId, {
+      message: "A reaction needs a cause other than the reacting entity.",
+      path: ["causeId"],
+    }),
 ]);
 
 export const storyBeatSchema = z
@@ -80,9 +127,10 @@ export type StorySequenceValidation =
 
 /**
  * Checks a sequence against one committed world: every referenced entity must
- * exist, and the golden-loop roles must fit (a character moves or is blocked, a
- * river blocks, a cloud causes weather, and presented weather matches the
- * committed state). Accepts unparsed input, never mutates the sequence or the
+ * exist, and roles and properties must fit (a character moves, is blocked or
+ * rides; an obstacle `blocks`; a cause of weather has `weather`; a flyer
+ * `flies`; a carrier `carries`; a launcher `launches`), and presented weather
+ * matches the committed state. Accepts unparsed input, never mutates the sequence or the
  * world, and returns a validated copy.
  */
 export function validateStorySequenceForWorld(
@@ -108,14 +156,24 @@ export function validateStorySequenceForWorld(
         errors.push(`${where}: ${field} "${id}" is not in this world.`);
       return entity;
     };
-    const requireKind = (
+    const requireRole = (
       field: string,
       id: string,
-      kind: EntityKind,
+      role: EntityRole,
       label: string,
     ) => {
       const entity = find(field, id);
-      if (entity && entity.kind !== kind)
+      if (entity && entity.role !== role)
+        errors.push(`${where}: ${field} "${id}" must be ${label}.`);
+    };
+    const requireProperty = (
+      field: string,
+      id: string,
+      property: EntityProperty,
+      label: string,
+    ) => {
+      const entity = find(field, id);
+      if (entity && !entity.properties.includes(property))
         errors.push(`${where}: ${field} "${id}" must be ${label}.`);
     };
     const { action } = beat;
@@ -126,12 +184,17 @@ export function validateStorySequenceForWorld(
         find("entityId", action.entityId);
         break;
       case "move_toward":
-        requireKind("entityId", action.entityId, "character", "a character");
+        requireRole("entityId", action.entityId, "character", "a character");
         find("targetId", action.targetId);
         break;
       case "blocked_by":
-        requireKind("entityId", action.entityId, "character", "a character");
-        requireKind("obstacleId", action.obstacleId, "river", "a river");
+        requireRole("entityId", action.entityId, "character", "a character");
+        requireProperty(
+          "obstacleId",
+          action.obstacleId,
+          "blocks",
+          "something that blocks",
+        );
         break;
       case "weather_shift":
         if (action.weather !== world.weather)
@@ -139,12 +202,59 @@ export function validateStorySequenceForWorld(
             `${where}: weather "${action.weather}" does not match this world's committed weather "${world.weather}".`,
           );
         if (action.causeEntityId)
-          requireKind(
+          requireProperty(
             "causeEntityId",
             action.causeEntityId,
-            "cloud",
-            "a cloud",
+            "weather",
+            "something that changes the weather",
           );
+        break;
+      case "fly_over":
+        requireProperty(
+          "entityId",
+          action.entityId,
+          "flies",
+          "something that flies",
+        );
+        requireProperty(
+          "obstacleId",
+          action.obstacleId,
+          "blocks",
+          "something that blocks",
+        );
+        break;
+      case "ride":
+        requireRole("entityId", action.entityId, "character", "a character");
+        requireProperty(
+          "carrierId",
+          action.carrierId,
+          "carries",
+          "something that carries",
+        );
+        if (action.targetId) find("targetId", action.targetId);
+        break;
+      case "launch":
+        find("entityId", action.entityId);
+        requireProperty(
+          "launcherId",
+          action.launcherId,
+          "launches",
+          "something that launches",
+        );
+        if (action.targetId) find("targetId", action.targetId);
+        break;
+      case "splash":
+        requireRole("entityId", action.entityId, "character", "a character");
+        requireProperty(
+          "obstacleId",
+          action.obstacleId,
+          "blocks",
+          "something that blocks",
+        );
+        break;
+      case "react":
+        requireRole("entityId", action.entityId, "character", "a character");
+        find("causeId", action.causeId);
         break;
     }
   });

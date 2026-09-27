@@ -14,19 +14,25 @@ const webp =
   ]).toString("base64");
 
 const hero = {
-  kind: "character",
+  role: "character",
+  description: "",
+  properties: ["moves"],
   name: "Sunny the Dragon",
   confidence: 0.96,
   box: { xMin: 120, yMin: 480, xMax: 210, yMax: 620 },
 };
 const river = {
-  kind: "river",
+  role: "obstacle",
+  description: "",
+  properties: ["blocks"],
   name: "Blue River",
   confidence: 0.93,
   box: { xMin: 420, yMin: 0, xMax: 540, yMax: 1000 },
 };
 const castle = {
-  kind: "castle",
+  role: "goal",
+  description: "",
+  properties: ["goal"],
   name: "Tall Castle",
   confidence: 0.9,
   box: { xMin: 730, yMin: 370, xMax: 880, yMax: 640 },
@@ -74,10 +80,10 @@ describe("live scene interpretation", () => {
       expect(res.statusCode).toBe(200);
       const body = sceneInterpretationResponseSchema.parse(res.json());
       expect(body.mode).toBe("live");
-      expect(body.candidates.map(({ kind }) => kind)).toEqual([
+      expect(body.candidates.map(({ role }) => role)).toEqual([
         "character",
-        "castle",
-        "river",
+        "goal",
+        "obstacle",
       ]);
       // IDs are minted by the server, never taken from the model.
       for (const candidate of body.candidates)
@@ -117,6 +123,103 @@ describe("live scene interpretation", () => {
         candidates: [...valid.candidates, valid.candidates[0]],
       }).success,
     ).toBe(false);
+  });
+
+  it("keeps each object's role, description and properties", async () => {
+    const described = {
+      ...goodScene,
+      objects: [
+        {
+          ...hero,
+          description: "An orange dragon with small wings.",
+          properties: ["moves", "flies", "flies"],
+        },
+        river,
+        {
+          role: "helper",
+          description: "A little wooden boat.",
+          properties: ["floats", "carries"],
+          name: "Boat",
+          confidence: 0.8,
+          box: { xMin: 430, yMin: 500, xMax: 530, yMax: 560 },
+        },
+        castle,
+      ],
+    };
+    const app = liveApp(asFetch(async () => geminiReply(described)));
+    try {
+      const res = await scene(app, { image: png });
+      expect(res.statusCode).toBe(200);
+      const body = sceneInterpretationResponseSchema.parse(res.json());
+      expect(
+        body.candidates.map(({ role, description, properties }) => ({
+          role,
+          description,
+          properties,
+        })),
+      ).toEqual([
+        {
+          role: "character",
+          description: "An orange dragon with small wings.",
+          // Repeated properties are folded, never rejected.
+          properties: ["moves", "flies"],
+        },
+        { role: "goal", description: "", properties: ["goal"] },
+        { role: "obstacle", description: "", properties: ["blocks"] },
+        {
+          role: "helper",
+          description: "A little wooden boat.",
+          properties: ["floats", "carries"],
+        },
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("fills empty properties from the role and folds repeats before the cap", async () => {
+    const sparse = {
+      ...goodScene,
+      objects: [
+        {
+          ...hero,
+          properties: [
+            "flies",
+            "flies",
+            "flies",
+            "flies",
+            "flies",
+            "flies",
+            "flies",
+            "moves",
+          ],
+        },
+        { ...river, properties: [] },
+        { ...castle, properties: [] },
+        {
+          role: "scenery",
+          description: "",
+          properties: [],
+          name: "Sun",
+          confidence: 0.9,
+          box: { xMin: 10, yMin: 10, xMax: 100, yMax: 100 },
+        },
+      ],
+    };
+    const app = liveApp(asFetch(async () => geminiReply(sparse)));
+    try {
+      const res = await scene(app, { image: png });
+      expect(res.statusCode).toBe(200);
+      expect(
+        res
+          .json()
+          .candidates.map(
+            ({ properties }: { properties: string[] }) => properties,
+          ),
+      ).toEqual([["flies", "moves"], ["goal"], ["blocks"], []]);
+    } finally {
+      await app.close();
+    }
   });
 
   it("returns image-normalized boxes for confirmation overlays", async () => {
@@ -172,36 +275,35 @@ describe("live scene interpretation", () => {
   });
 
   it("uses the narration to identify an ambiguous object", async () => {
-    // The same tall block: a shelter without context, a castle when named.
+    // The same tall block: a shelter without context, a goal when named.
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
       const { narration } = JSON.parse(
         JSON.parse(init.body as string).contents[0].parts[0].text,
       );
-      const building = {
-        ...castle,
-        kind: /castle/i.test(narration ?? "") ? "castle" : "shelter",
-      };
+      const building = /castle/i.test(narration ?? "")
+        ? castle
+        : { ...castle, role: "helper", properties: ["shelters"] };
       return geminiReply({ ...goodScene, objects: [hero, river, building] });
     });
     const app = liveApp(asFetch(fetchMock));
     try {
-      const kinds = async (payload: object) =>
+      const roles = async (payload: object) =>
         (await scene(app, payload))
           .json()
-          .candidates.map(({ kind }: { kind: string }) => kind);
-      expect(await kinds({ image: png })).toContain("shelter");
-      const named = await kinds({
+          .candidates.map(({ role }: { role: string }) => role);
+      expect(await roles({ image: png })).toContain("helper");
+      const named = await roles({
         image: png,
         transcript: "the big building is my castle",
       });
-      expect(named).toContain("castle");
-      expect(named).not.toContain("shelter");
+      expect(named).toContain("goal");
+      expect(named).not.toContain("helper");
     } finally {
       await app.close();
     }
   });
 
-  it("keeps one hero, castle, and river and drops extra copies", async () => {
+  it("keeps one hero and one goal, drops their copies, and keeps every obstacle", async () => {
     const crowded = {
       ...goodScene,
       objects: [
@@ -219,7 +321,12 @@ describe("live scene interpretation", () => {
       const names = res
         .json()
         .candidates.map(({ name }: { name: string }) => name);
-      expect(names).toEqual(["Sunny the Dragon", "Tall Castle", "Blue River"]);
+      expect(names).toEqual([
+        "Sunny the Dragon",
+        "Tall Castle",
+        "Blue River",
+        "Small stream",
+      ]);
     } finally {
       await app.close();
     }
@@ -243,9 +350,34 @@ describe("live scene interpretation", () => {
     const cases: Record<string, unknown> = {
       "not JSON": "here is your scene!",
       "wrong shape": { scene: true },
-      "unsupported kind": {
+      "unknown role": {
         ...goodScene,
-        objects: [{ ...hero, kind: "dragon-lair" }],
+        objects: [{ ...hero, role: "dragon-lair" }],
+      },
+      "unknown property": {
+        ...goodScene,
+        objects: [hero, { ...river, properties: ["blocks", "teleports"] }],
+      },
+      "too many properties": {
+        ...goodScene,
+        objects: [
+          {
+            ...hero,
+            properties: [
+              "moves",
+              "flies",
+              "swims",
+              "floats",
+              "carries",
+              "launches",
+              "burns",
+            ],
+          },
+        ],
+      },
+      "description too long": {
+        ...goodScene,
+        objects: [{ ...hero, description: "d".repeat(121) }],
       },
       "arbitrary operation": {
         ...goodScene,

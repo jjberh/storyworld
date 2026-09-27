@@ -12,14 +12,18 @@ function world(river: Entity): WorldState {
       {
         id: "hero",
         name: "Hero",
-        kind: "character",
+        role: "character",
+        description: "",
+        properties: ["moves"],
         bounds: { x: 40, y: 300, width: 60, height: 70 },
       },
       river,
       {
         id: "goal",
         name: "Goal",
-        kind: "castle",
+        role: "goal",
+        description: "",
+        properties: ["goal"],
         bounds: { x: 900, y: 250, width: 80, height: 100 },
       },
     ],
@@ -35,7 +39,9 @@ describe("bridgeOperationForWorld", () => {
     const initial = world({
       id: "river",
       name: "Wide River",
-      kind: "river",
+      role: "obstacle",
+      description: "",
+      properties: ["blocks"],
       bounds: { x: 365, y: 100, width: 210, height: 410 },
     });
     const operation = bridgeOperationForWorld(initial, "bridge");
@@ -57,7 +63,9 @@ describe("bridgeOperationForWorld", () => {
         world({
           id: "river",
           name: "Edge River",
-          kind: "river",
+          role: "obstacle",
+          description: "",
+          properties: ["blocks"],
           bounds,
         }),
         `bridge-${bounds.x}`,
@@ -76,11 +84,13 @@ describe("bridgeOperationForWorld", () => {
     const initial = world({
       id: "river",
       name: "Removed",
-      kind: "river",
+      role: "obstacle",
+      description: "",
+      properties: ["blocks"],
       bounds: { x: 400, y: 0, width: 100, height: 600 },
     });
     initial.entities = initial.entities.filter(
-      (entity) => entity.kind !== "river",
+      (entity) => !entity.properties.includes("blocks"),
     );
     const operation = bridgeOperationForWorld(initial, "fallback");
     if (operation.type !== "CREATE_ENTITY") throw new Error("Expected bridge");

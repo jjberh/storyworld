@@ -26,12 +26,12 @@ The default route begins with exactly two choices: **Start from scratch** and **
 After **Bring my world to life**, the child checks the proposed objects one at a time on their own picture. The current object is highlighted over the image and the card asks, for example, "Is this Fox?" with three answers:
 
 - **Yes, that's right!** accepts the object and moves to the next one.
-- **Change it** opens **What should we call it?** and **What kind of thing is it?** so the child can rename or retype the object, and **Draw a new box around it** to redraw its region with the pointer. Bounds are never typed in as numbers.
+- **Change it** opens **What should we call it?** and **What kind of thing is it?** so the child can rename or retype the object (Main character, A place to reach, Something in the way, A helper, Part of the scene), and **Draw a new box around it** to redraw its region with the pointer. Bounds are never typed in as numbers.
 - **That is not in my picture** removes the detection.
 
-**I missed something** lets the child draw a box around anything Gemini overlooked and then name it. Every object must be checked before **Start my story** appears, and exactly one character is required. There is no separate destination picker and the opening narration is not editable here: the destination is Gemini's proposed castle while it remains a confirmed castle, and the narration is Gemini's. Fixture (sample) detections are labelled and need the child's consent (**Use this practice reading**) before they can start a local test story.
+**I missed something** lets the child draw a box around anything Gemini overlooked and then name it; it starts as part of the scene. Retyping an object gives it that role's default properties, so "Something in the way" blocks and "A helper" can carry the character across. Every object must be checked before **Start my story** appears, and exactly one character is required. There is no separate destination picker and the opening narration is not editable here: the destination is Gemini's proposed goal while it is still a place to reach (otherwise the first object the child marked as one), and the narration is Gemini's. Fixture (sample) detections are labelled and need the child's consent (**Use this practice reading**) before they can start a local test story.
 
-No relationship is inferred from a detected river. Seeing a river does not mean the character fears it, so the confirmed scene carries no `afraid_of` rule unless an explicit, validated `fearedRiverId` is supplied (the contract and reducer still accept one). The geometric simulation still treats an unbridged river between the character and the destination as an obstacle, independently of any rule.
+No relationship is inferred from a detected obstacle. Seeing a river does not mean the character fears it, so the confirmed scene carries no `afraid_of` rule unless an explicit, validated `fearedObstacleId` is supplied (the contract and reducer still accept one, and it must name something that `blocks`). The geometric simulation still treats anything that `blocks` between the character and the destination as in the way unless a helper that `carries` spans it, independently of any rule.
 
 Changing the picture or prompt invalidates the interpretation until it is submitted again. **Start my story** freezes the accepted submission, including one world ID and one request ID, and advances only when the committed world is observed. The `initializeScene` reducer validates the complete `ConfirmedScene`, builds typed operations against an empty world, and atomically stores the entities, rules, goal, initial event and `storyDocument` row. Identical owner/request/payload retries return the existing result; conflicting payloads or other owners are rejected.
 
@@ -41,7 +41,7 @@ Fixture interpretation can only create a local test world. With live interpretat
 
 After the committed world is observed, the browser holds that world client for the page session and the URL becomes `/?mode=fixture&world=<id>` or `/?mode=live&world=<id>`. That address is the room. Story Room lists the people currently in that world from the shared `participant` rows. A guest opens `/join?mode=live&world=<id>` and subscribes to the same document, revision, events, and people in the room. Fixture `/join` cannot see another tab's in-memory world; use live mode to share.
 
-The shareable room turns the confirmed picture into a responsive paper theater drawn on one Pixi canvas. Confirmed object bounds become light-edged paper cutouts over a subdued copy of the drawing, each with a small idle loop; later bridge, cloud, and shelter entities use procedural paper tokens. The committed world renders immediately, then Story Room asks the bounded story director to present only the newest committed event. It accepts a sequence only while its request, event, and revision are still current and the sequence validates against that world. On an API or provider failure it says that the moment will play locally and uses the deterministic committed-event sequence. Pending proposals and unrelated presence updates neither request nor restart playback, and reduced-motion users receive the same narrated semantic states without wobble or confetti.
+The shareable room turns the confirmed picture into a responsive paper theater drawn on one Pixi canvas. Confirmed object bounds become light-edged paper cutouts over a subdued copy of the drawing, each with a small idle loop; later additions use procedural paper tokens chosen from their role and properties. Each piece's idle loop also comes from its properties: characters hop (or glide if they fly), flyers glide with a flap, swimmers and floaters sway, launchers squash and spring, movers roll, weather drifts, blockers shimmer, and everything else breathes. The committed world renders immediately, then Story Room asks the bounded story director to present only the newest committed event. It accepts a sequence only while its request, event, and revision are still current and the sequence validates against that world. On an API or provider failure it says that the moment will play locally and uses the deterministic committed-event sequence. Pending proposals and unrelated presence updates neither request nor restart playback, and reduced-motion users receive the same narrated semantic states without wobble or confetti.
 
 Tapping a piece plays a short local reaction (giggle, jump, spin or wave) with a brief cooldown; it never touches the world, and reduced-motion users get a soft highlight instead. **Save my movie** replays the reveal and the best story moment into a hidden second renderer and records it in the browser with `MediaRecorder` (WebM, or MP4 where only that is supported), then downloads it or opens the share sheet on phones.
 
@@ -59,12 +59,21 @@ Dismiss an uncertain preview with **Keep drawing** to revise your words and retr
 
 Provider work proposes a `SceneInterpretationResponse`: image-space object candidates, confidence scores, opening narration, character and goal references, and mood hints. The child confirms or corrects those candidates before the application creates world operations. A confirmed `WorldEvent` is the handoff for visual and audio reactions; it carries a stable event ID, revision, readable summary, and the complete committed world state.
 
+### Entities: roles and properties
+
+Every entity has a `role` the engine needs, a friendly `name`, a short `description`, and up to six `properties` from a closed list (`SCHEMA_VERSION` 2):
+
+- Roles: `character` (the one hero), `goal` (a place to reach), `obstacle`, `helper`, `scenery`.
+- Properties: `moves`, `flies`, `swims`, `floats`, `carries`, `launches`, `blocks`, `burns`, `scares`, `shelters`, `weather`, `goal`.
+
+The world rules read properties through `@storyworld/contracts/entity-traits`: anything that `blocks` between the character and the goal blocks the route unless a `helper` that `carries` spans it, and anything with `weather` brings rain. `description` is model-written text: it is shown to the story director only as untrusted guidance and never decides structure. The Nova fixture maps to Nova (`character`, `moves`), River (`obstacle`, `blocks`), Castle (`goal`, `goal`), the sample bridge (`helper`, `carries`) and the storm cloud (`scenery`, `weather`).
+
 ### Story beat contract
 
 Living-story sequences use the strict, presentation-only contract in `@storyworld/contracts/story-beat` (the types are also exported from `@storyworld/contracts`). Story Room submits the latest committed event and its predecessor to the bounded director, rejects stale or invalid responses, and falls back to the deterministic committed-event sequence when directing fails.
 
-- Gemini may propose 1 to 3 **story beats**. Each has an ID, short narration (240 characters at most), a mood, and exactly one action from a fixed set: `focus`, `move_toward`, `blocked_by`, `reveal`, `weather_shift`, or `celebrate`.
-- Beats reference confirmed entities only. `validateStorySequenceForWorld(sequence, world)` rejects any unknown entity ID and any role that does not fit the golden loop: a character moves toward something or is blocked, a river blocks, and a cloud causes weather. It never mutates the sequence or the world.
+- Gemini may propose 1 to 3 **story beats**. Each has an ID, short narration (240 characters at most), a mood, and exactly one action from a fixed set: `focus`, `move_toward`, `blocked_by`, `reveal`, `weather_shift`, `celebrate`, `fly_over`, `ride`, `launch`, `splash`, or `react`.
+- Beats reference confirmed entities only. `validateStorySequenceForWorld(sequence, world)` rejects any unknown entity ID and any role or property that does not fit: a character moves toward something, is blocked, rides, splashes or reacts; an obstacle `blocks`; a weather cause has `weather`; a flyer `flies`; a carrier `carries`; and a launcher `launches`. It never mutates the sequence or the world.
 - A sequence carries client-supplied correlation and freshness tokens: `requestId`, `sourceRevision`, and `sourceEventId` are validated and echoed by the API server, never supplied by the model. The endpoint does not authenticate database provenance; callers must submit snapshots they obtained from their trusted committed-event subscription. A client can discard a sequence whose revision or event is no longer current, that a newer request has replaced, or that mentions an entity that no longer exists.
 - Beats are presentation data and never change the world. They carry no coordinates, durations, easing, CSS, component names, world operations, audio, or video. The renderer decides timing and visuals.
 - `POST /api/story/sequence` accepts a request ID, an event token (`id`, `revision`, and `summary`), its current `committedWorld`, and the required `previousCommittedWorld` snapshot (`null` only for revision zero), plus optional child description and opening narration. Structural deltas determine event relevance. Without a Gemini key it returns the deterministic fixture sequence; with a key Gemini chooses only narration, mood, and a bounded action. The server constructs response metadata and validates entity roles, current weather, and relevance to the submitted delta. Request bodies are capped at 1 MiB. Live provider failures are explicit and never fall back to fixture.
@@ -139,7 +148,7 @@ Never prefix provider secrets with `VITE_`, commit `.env`, or paste keys into an
 
 ### Gemini interpretation behavior
 
-With a key, `/api/interpret/edit` sends the narration and drawing to Gemini with a structured-output schema. Gemini only chooses what the child added (`bridge`, `cloud`, or `shelter`), a friendly name, and a confidence; the server builds the `CREATE_ENTITY` operation with its own ID and the drawn `changedRegion` as bounds, then validates it with the shared contract. Nothing from the model writes to SpacetimeDB. `/api/health` reports `providerMode` and `storyProviderMode` as `live` or `fixture`.
+With a key, `/api/interpret/edit` sends the narration and drawing to Gemini with a structured-output schema. Gemini only chooses what the child added (a role of `obstacle`, `helper`, or `scenery`, its properties, a short description), a friendly name, and a confidence; the selected tool is sent as an advisory `hint` (`bridge`, `cloud`, or `shelter`), which the keyless fixture uses directly; the server builds the `CREATE_ENTITY` operation with its own ID and the drawn `changedRegion` as bounds, then validates it with the shared contract. Nothing from the model writes to SpacetimeDB. `/api/health` reports `providerMode` and `storyProviderMode` as `live` or `fixture`.
 
 If Gemini fails, the route does not fall back to the fixture. It returns a recoverable error and the drawing is untouched:
 
@@ -160,14 +169,18 @@ Codes: `PROVIDER_TIMEOUT` (504), `PROVIDER_RATE_LIMITED` (503), `PROVIDER_UNAVAI
   "candidates": [
     {
       "id": "character-…",
-      "kind": "character",
+      "role": "character",
+      "description": "A small orange dragon.",
+      "properties": ["moves", "flies"],
       "name": "Sunny",
       "confidence": 0.95,
       "imageBounds": { "x": 0.105, "y": 0.458, "width": 0.17, "height": 0.258 }
     },
     {
-      "id": "castle-…",
-      "kind": "castle",
+      "id": "goal-…",
+      "role": "goal",
+      "description": "A tall purple castle.",
+      "properties": ["goal"],
       "name": "Tall Castle",
       "confidence": 0.92,
       "imageBounds": { "x": 0.71, "y": 0.2, "width": 0.2, "height": 0.35 }
@@ -175,12 +188,12 @@ Codes: `PROVIDER_TIMEOUT` (504), `PROVIDER_RATE_LIMITED` (503), `PROVIDER_UNAVAI
   ],
   "openingNarration": "One warm sentence about the character.",
   "characterCandidateId": "character-…",
-  "goalCandidateId": "castle-…",
+  "goalCandidateId": "goal-…",
   "moodHints": ["curious", "worried"]
 }
 ```
 
-The response uses the shared `SceneInterpretationResponse` contract. `imageBounds` are normalized from 0 to 1 against the original picture, so the UI can place confirmation overlays without assuming an aspect ratio. Gemini identifies only `character`, `castle`, `river`, `bridge`, `cloud`, and `shelter`; the server mints candidate IDs, keeps at most one character, castle, and river, and requires a character. The application must wait for the child to confirm or correct candidates before converting them into world operations. Without a key the route returns fixed Nova, river, and castle candidates with `"mode": "fixture"` and ignores the image.
+The response uses the shared `SceneInterpretationResponse` contract. `imageBounds` are normalized from 0 to 1 against the original picture, so the UI can place confirmation overlays without assuming an aspect ratio. Gemini gives each object a role, up to six properties and a short description; the server mints candidate IDs, keeps at most one character and one goal (obstacles, helpers and scenery may repeat), and requires a character. An unknown role or property is `INVALID_MODEL_OUTPUT`. The application must wait for the child to confirm or correct candidates before converting them into world operations. Without a key the route returns fixed Nova, river, and castle candidates with `"mode": "fixture"` and ignores the image.
 
 Whole-scene requests may take 5-10 seconds. The browser client uses a 25-second abort for this endpoint and callers should show a non-blocking “reading your picture” state.
 

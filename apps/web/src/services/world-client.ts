@@ -10,10 +10,11 @@ import {
   type RoomParticipant,
 } from "@storyworld/contracts/model";
 import {
-  operationSchema,
   confirmedSceneSchema,
+  operationSchema,
   type ConfirmedScene,
 } from "@storyworld/contracts";
+import { decodeOperation, decodeRoom } from "./room-decoding";
 export class LiveWorldClient implements WorldClient {
   private connection: DbConnection | null = null;
   private uri: string | null = null;
@@ -144,34 +145,50 @@ export class LiveWorldClient implements WorldClient {
     const conn = this.connection;
     const meta = conn.db.metadata.id.find("schema");
     if (!meta || meta.schemaVersion !== SCHEMA_VERSION) {
-      this.fail("Database schema does not match foundation v1.");
+      this.fail(
+        `Database schema does not match foundation v${SCHEMA_VERSION}.`,
+      );
       return;
     }
     const row = conn.db.world.id.find(this.room);
-    const events = [...conn.db.worldEvent.iter()]
-      .filter((e) => e.worldId === this.room)
-      .sort((a, b) => a.revision - b.revision)
-      .map((e) => ({
-        id: e.id,
-        revision: e.revision,
-        actor: e.actor.toHexString(),
-        summary: e.summary,
-        state: JSON.parse(e.snapshot) as WorldState,
-      }));
-    const world = events.at(-1)?.state ?? null;
+    const room = decodeRoom({
+      worldSchemaVersion: row?.schemaVersion,
+      events: [...conn.db.worldEvent.iter()]
+        .filter((e) => e.worldId === this.room)
+        .map((e) => ({
+          id: e.id,
+          revision: e.revision,
+          actor: e.actor.toHexString(),
+          summary: e.summary,
+          snapshot: e.snapshot,
+        })),
+      scene: conn.db.storyDocument.worldId.find(this.room)?.scene,
+    });
+    if (!room.ok) {
+      this.fail(room.error);
+      return;
+    }
+    const events = room.events;
+    const world: WorldState | null = events.at(-1)?.state ?? null;
     const proposals: Proposal[] = [...conn.db.proposal.iter()]
       .filter((p) => p.worldId === this.room)
-      .map((p) => ({
-        id: p.id,
-        actor: p.actor.toHexString(),
-        operation: operationSchema.parse(JSON.parse(p.operation)),
-        status:
-          p.status === "approved"
-            ? "approved"
-            : p.status === "rejected"
-              ? "rejected"
-              : "pending",
-      }));
+      .flatMap((p) => {
+        const operation = decodeOperation(p.operation);
+        if (!operation) return [];
+        return [
+          {
+            id: p.id,
+            actor: p.actor.toHexString(),
+            operation,
+            status:
+              p.status === "approved"
+                ? "approved"
+                : p.status === "rejected"
+                  ? "rejected"
+                  : "pending",
+          } satisfies Proposal,
+        ];
+      });
     const you = conn.identity;
     const owner = row?.owner;
     const participants: RoomParticipant[] = [...conn.db.participant.iter()]
@@ -195,11 +212,7 @@ export class LiveWorldClient implements WorldClient {
       proposals,
       participants,
       isDirector: !!row && !!you && row.owner.isEqual(you),
-      scene: conn.db.storyDocument.worldId.find(this.room)
-        ? confirmedSceneSchema.parse(
-            JSON.parse(conn.db.storyDocument.worldId.find(this.room)!.scene),
-          )
-        : undefined,
+      scene: room.scene,
     };
     this.notify();
   }

@@ -1,11 +1,14 @@
 import { z } from "zod";
 import { storyMoodSchema } from "./story-schema";
 import { boundsSchema, entitySchema, operationSchema } from "./world-schema";
+import { isBlocker } from "./entity-traits";
 export * from "./model";
+export * from "./entity-traits";
 export { storyMoodSchema };
 export {
   entityIdSchema,
-  entityKindSchema,
+  entityPropertySchema,
+  entityRoleSchema,
   ruleSchema,
   worldStateSchema,
 } from "./world-schema";
@@ -41,7 +44,9 @@ export const sceneCandidateSchema = z
   .object({
     id: z.string().min(1).max(80),
     name: z.string().min(1).max(80),
-    kind: entitySchema.shape.kind,
+    role: entitySchema.shape.role,
+    description: entitySchema.shape.description,
+    properties: entitySchema.shape.properties,
     confidence: z.number().min(0).max(1),
     imageBounds: imageBoundsSchema,
   })
@@ -67,7 +72,7 @@ export const sceneInterpretationResponseSchema = z
         path: ["candidates"],
         message: "Candidate IDs must be unique",
       });
-    if (candidatesById.get(response.characterCandidateId)?.kind !== "character")
+    if (candidatesById.get(response.characterCandidateId)?.role !== "character")
       context.addIssue({
         code: "custom",
         path: ["characterCandidateId"],
@@ -75,12 +80,12 @@ export const sceneInterpretationResponseSchema = z
       });
     if (
       response.goalCandidateId &&
-      candidatesById.get(response.goalCandidateId)?.kind !== "castle"
+      candidatesById.get(response.goalCandidateId)?.role !== "goal"
     )
       context.addIssue({
         code: "custom",
         path: ["goalCandidateId"],
-        message: "Goal reference must identify a castle candidate",
+        message: "Goal reference must identify a goal candidate",
       });
   });
 export const initialSceneResponseSchema = z
@@ -101,7 +106,8 @@ export const interpretationInput = z
     transcript: z.string().max(2000).optional(),
     image: z.string().max(4_000_000).optional(),
     changedRegion: boundsSchema.optional(),
-    entityKind: z.enum(["bridge", "cloud", "shelter"]).optional(),
+    /** The edit tool the child picked. Fixture trusts it; live treats it as advisory. */
+    hint: z.enum(["bridge", "cloud", "shelter"]).optional(),
   })
   .strict();
 export const interpretationOutput = z.object({
@@ -152,7 +158,7 @@ export const confirmedSceneSchema = z
       .max(20),
     characterId: z.string().min(1),
     goalId: z.string().optional(),
-    fearedRiverId: z.string().optional(),
+    fearedObstacleId: z.string().optional(),
     openingNarration: z.string().trim().min(1).max(600),
     moodHints: z.array(storyMoodSchema).min(1).max(3),
   })
@@ -164,16 +170,16 @@ export const confirmedSceneSchema = z
     if (objects.size !== scene.objects.length)
       issue("Object IDs must be unique.");
     if (
-      scene.objects.filter((o) => o.kind === "character").length !== 1 ||
-      objects.get(scene.characterId)?.kind !== "character"
+      scene.objects.filter((o) => o.role === "character").length !== 1 ||
+      objects.get(scene.characterId)?.role !== "character"
     )
       issue("Choose exactly one main character.");
-    if (scene.goalId && objects.get(scene.goalId)?.kind !== "castle")
-      issue("Choose a confirmed castle as the destination.");
-    if (
-      scene.fearedRiverId &&
-      objects.get(scene.fearedRiverId)?.kind !== "river"
-    )
-      issue("Choose a confirmed river for the fear rule.");
+    if (scene.goalId && objects.get(scene.goalId)?.role !== "goal")
+      issue("Choose a confirmed place to reach as the destination.");
+    if (scene.fearedObstacleId) {
+      const feared = objects.get(scene.fearedObstacleId);
+      if (!feared || !isBlocker(feared))
+        issue("Choose a confirmed obstacle that blocks for the fear rule.");
+    }
   });
 export type ConfirmedScene = z.infer<typeof confirmedSceneSchema>;

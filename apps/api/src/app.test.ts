@@ -6,15 +6,18 @@ it("returns explicit fixture operations and rejects malformed input", async () =
     const good = await app.inject({
       method: "POST",
       url: "/api/interpret/edit",
-      payload: { entityKind: "cloud" },
+      payload: { hint: "cloud" },
     });
     expect(good.statusCode).toBe(200);
     expect(good.json().mode).toBe("fixture");
-    expect(good.json().candidates[0].operation.entity.kind).toBe("cloud");
+    expect(good.json().candidates[0].operation.entity).toMatchObject({
+      role: "scenery",
+      properties: ["weather"],
+    });
     const bad = await app.inject({
       method: "POST",
       url: "/api/interpret/edit",
-      payload: { entityKind: "execute-code" },
+      payload: { hint: "execute-code" },
     });
     expect(bad.statusCode).toBe(400);
     const unavailable = await app.inject({

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { Application, Graphics, Text } from "pixi.js";
 import type { WorldEvent, WorldState } from "@storyworld/contracts/model";
+import { isSpanner } from "@storyworld/contracts/entity-traits";
+import { entityLook } from "./entity-look";
 export function WorldStage({
   world,
   latestEvent,
@@ -74,7 +76,7 @@ export function WorldStage({
           g.ellipse(800, 580, 450, 150).fill("#b9d0a5");
           for (const e of w.entities) {
             const b = e.bounds;
-            if (e.kind === "river") {
+            if (entityLook(e) === "water") {
               g.rect(b.x, b.y, b.width, b.height).fill("#89bfcb");
               for (let i = 0; i < 10; i++)
                 g.roundRect(
@@ -85,7 +87,7 @@ export function WorldStage({
                   2,
                 ).fill("#cce4dd");
             }
-            if (e.kind === "bridge") {
+            if (entityLook(e) === "span") {
               const shownWidth = Math.max(8, b.width * reveal);
               const nearMiss = w.pathStatus === "blocked";
               g.roundRect(b.x, b.y, shownWidth, b.height, 5).fill(
@@ -102,7 +104,7 @@ export function WorldStage({
                 );
               }
             }
-            if (e.kind === "cloud") {
+            if (entityLook(e) === "cloud") {
               g.ellipse(
                 b.x + b.width / 2,
                 b.y + b.height / 2,
@@ -148,7 +150,7 @@ export function WorldStage({
               reveal < 1 ? "A way through!" : "Nova can reach the castle";
             cue.style.fill = "#315445";
             cue.position.set(510, 250);
-          } else if (w.entities.some((e) => e.kind === "bridge")) {
+          } else if (w.entities.some(isSpanner)) {
             cue.text = "Almost — reach both riverbanks";
             cue.style.fill = "#a44d3f";
             cue.position.set(480, 250);

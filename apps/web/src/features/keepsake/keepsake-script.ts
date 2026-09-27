@@ -72,13 +72,18 @@ const actionWeight: Record<StoryAction["type"], number> = {
   reveal: 1,
   blocked_by: 1,
   weather_shift: 1,
+  fly_over: 2,
+  ride: 2,
+  launch: 2,
+  splash: 1,
+  react: 1,
   focus: 0,
 };
 
 /**
- * How much happens in a sequence: a celebration outweighs a journey, which
- * outweighs a plain reveal, blocked moment or weather change; a focus beat
- * adds nothing.
+ * How much happens in a sequence: a celebration outweighs a journey (moving,
+ * flying over, riding or launching), which outweighs a plain reveal, blocked
+ * moment, splash, reaction or weather change; a focus beat adds nothing.
  */
 export function momentScore(sequence: StorySequence) {
   return sequence.beats.reduce(
@@ -140,7 +145,7 @@ export function openingAfterIntro(sequence: StorySequence): StorySequence {
 function heroOf(world: WorldState) {
   return (
     world.entities.find((entity) => entity.id === world.goal?.characterId) ??
-    world.entities.find((entity) => entity.kind === "character")
+    world.entities.find((entity) => entity.role === "character")
   );
 }
 

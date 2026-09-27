@@ -1,4 +1,10 @@
 import type { Entity } from "@storyworld/contracts/model";
+import {
+  has,
+  isBlocker,
+  isSpanner,
+  makesRain,
+} from "@storyworld/contracts/entity-traits";
 import { RESTING_POSE, type Pose } from "./stage-motion";
 
 // Pure rules for tap reactions in the Story Room. A tap is local play: it never
@@ -32,19 +38,20 @@ export function reactionDurationMs(reaction: ReactionKind) {
   return durations[reaction];
 }
 
-const reactionsByKind: Record<Entity["kind"], TouchReaction[]> = {
-  character: ["giggle", "jump", "spin", "wave"],
-  cloud: ["giggle", "spin", "wave"],
-  castle: ["giggle", "jump", "wave"],
-  shelter: ["giggle", "jump", "wave"],
-  // Long, ground-bound pieces: no leaping or spinning a river off its banks.
-  river: ["giggle", "wave"],
-  bridge: ["giggle", "wave"],
-};
+type Traits = Pick<Entity, "role" | "properties">;
 
-/** The reactions that suit a piece of this kind. */
-export function reactionsFor(kind: Entity["kind"]): readonly TouchReaction[] {
-  return reactionsByKind[kind];
+const ALL: TouchReaction[] = ["giggle", "jump", "spin", "wave"];
+const AIRBORNE: TouchReaction[] = ["giggle", "spin", "wave"];
+// Long, ground-bound pieces: no leaping or spinning a river off its banks.
+const GROUNDED: TouchReaction[] = ["giggle", "wave"];
+const STANDING: TouchReaction[] = ["giggle", "jump", "wave"];
+
+/** The reactions that suit a piece with this role and these properties. */
+export function reactionsFor(entity: Traits): readonly TouchReaction[] {
+  if (entity.role === "character") return ALL;
+  if (makesRain(entity) || has(entity, "flies")) return AIRBORNE;
+  if (isBlocker(entity) || isSpanner(entity)) return GROUNDED;
+  return STANDING;
 }
 
 /** A small deterministic integer hash of a seed in [0, 1) and a tap count. */
@@ -58,15 +65,15 @@ function mix(seed: number, tap: number) {
 /**
  * Picks the reaction for the `tap`-th accepted tap on a piece. Deterministic
  * for a given seed and tap count, and never repeats the previous reaction when
- * the kind has more than one to choose from.
+ * the piece has more than one to choose from.
  */
 export function chooseReaction(
-  kind: Entity["kind"],
+  entity: Traits,
   seed: number,
   tap: number,
   previous?: TouchReaction,
 ): TouchReaction {
-  const options = reactionsFor(kind);
+  const options = reactionsFor(entity);
   const fresh =
     previous && options.length > 1
       ? options.filter((option) => option !== previous)
@@ -100,7 +107,7 @@ export const IDLE_REACTIONS: ReactionState = {
  */
 export function tapReaction(
   state: ReactionState,
-  kind: Entity["kind"],
+  entity: Traits,
   seed: number,
   nowMs: number,
   reducedMotion: boolean,
@@ -108,7 +115,7 @@ export function tapReaction(
   if (nowMs < state.readyAtMs) return { state, started: undefined };
   const reaction: ReactionKind = reducedMotion
     ? "highlight"
-    : chooseReaction(kind, seed, state.taps, state.last);
+    : chooseReaction(entity, seed, state.taps, state.last);
   return {
     started: reaction,
     state: {

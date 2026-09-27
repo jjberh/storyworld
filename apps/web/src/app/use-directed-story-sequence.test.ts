@@ -16,7 +16,9 @@ const scene: ConfirmedScene = {
     {
       id: "nova",
       name: "Nova",
-      kind: "character",
+      role: "character",
+      description: "",
+      properties: ["moves"],
       confidence: 1,
       imageBounds: { x: 0, y: 0, width: 0.2, height: 0.2 },
     },
@@ -42,7 +44,9 @@ const second: WorldEvent = {
     type: "CREATE_ENTITY",
     entity: {
       id: "bridge-1",
-      kind: "bridge",
+      role: "helper",
+      description: "",
+      properties: ["carries"],
       name: "Bridge",
       bounds: { x: 400, y: 280, width: 160, height: 80 },
     },

@@ -33,8 +33,20 @@ describe("live Gemini interpretation", () => {
     const fetchMock = vi.fn(async () =>
       geminiReply({
         candidates: [
-          { kind: "cloud", name: "Puffy cloud", confidence: 0.2 },
-          { kind: "bridge", name: "Rainbow bridge", confidence: 0.9 },
+          {
+            role: "scenery",
+            description: "",
+            properties: ["weather"],
+            name: "Puffy cloud",
+            confidence: 0.2,
+          },
+          {
+            role: "helper",
+            description: "",
+            properties: ["carries"],
+            name: "Rainbow bridge",
+            confidence: 0.9,
+          },
         ],
         message: "What a lovely bridge!",
       }),
@@ -51,9 +63,16 @@ describe("live Gemini interpretation", () => {
       expect(body.mode).toBe("live");
       expect(body.candidates[0].operation).toMatchObject({
         type: "CREATE_ENTITY",
-        entity: { kind: "bridge", name: "Rainbow bridge", bounds: region },
+        entity: {
+          role: "helper",
+          description: "",
+          properties: ["carries"],
+          name: "Rainbow bridge",
+          bounds: region,
+        },
       });
-      expect(body.candidates[0].operation.entity.id).toMatch(/^bridge-/);
+      // IDs are minted by the server from the role, never taken from the model.
+      expect(body.candidates[0].operation.entity.id).toMatch(/^helper-/);
 
       const [url, init] = fetchMock.mock.calls[0] as unknown as [
         string,
@@ -76,13 +95,21 @@ describe("live Gemini interpretation", () => {
   it("uses the drawn region, not model geometry, for bounds", async () => {
     const app = liveApp((async () =>
       geminiReply({
-        candidates: [{ kind: "cloud", name: "Storm cloud", confidence: 1 }],
+        candidates: [
+          {
+            role: "scenery",
+            description: "",
+            properties: ["weather"],
+            name: "Storm cloud",
+            confidence: 1,
+          },
+        ],
         message: "A storm is coming!",
         // Extra fields are not part of the schema and must not leak through.
         bounds: { x: 0, y: 0, width: 1000, height: 600 },
       })) as typeof fetch);
     try {
-      const res = await interpret(app, { entityKind: "cloud" });
+      const res = await interpret(app, { hint: "cloud" });
       expect(res.json().candidates[0].operation.entity.bounds).toEqual({
         x: 580,
         y: 80,
@@ -94,9 +121,69 @@ describe("live Gemini interpretation", () => {
     }
   });
 
+  it("fills empty properties from the role and folds repeated ones", async () => {
+    const app = liveApp((async () =>
+      geminiReply({
+        candidates: [
+          {
+            role: "obstacle",
+            description: "A tall wall.",
+            properties: [],
+            name: "Wall",
+            confidence: 0.9,
+          },
+          {
+            role: "helper",
+            description: "",
+            properties: [
+              "flies",
+              "flies",
+              "flies",
+              "flies",
+              "flies",
+              "flies",
+              "carries",
+            ],
+            name: "Bird",
+            confidence: 0.5,
+          },
+          {
+            role: "scenery",
+            description: "",
+            properties: [],
+            name: "Flower",
+            confidence: 0.2,
+          },
+        ],
+        message: "A wall!",
+      })) as typeof fetch);
+    try {
+      const res = await interpret(app, { hint: "bridge", image: pixel });
+      expect(res.statusCode).toBe(200);
+      expect(
+        res
+          .json()
+          .candidates.map(
+            (candidate: { operation: { entity: { properties: string[] } } }) =>
+              candidate.operation.entity.properties,
+          ),
+      ).toEqual([["blocks"], ["flies", "carries"], []]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("ignores thought parts that precede the answer", async () => {
     const answer = {
-      candidates: [{ kind: "bridge", name: "Bridge", confidence: 0.8 }],
+      candidates: [
+        {
+          role: "helper",
+          description: "",
+          properties: ["carries"],
+          name: "Bridge",
+          confidence: 0.8,
+        },
+      ],
       message: "Nice bridge!",
     };
     const app = liveApp(
@@ -120,9 +207,12 @@ describe("live Gemini interpretation", () => {
         )) as typeof fetch,
     );
     try {
-      const res = await interpret(app, { entityKind: "bridge" });
+      const res = await interpret(app, { hint: "bridge" });
       expect(res.statusCode).toBe(200);
-      expect(res.json().candidates[0].operation.entity.kind).toBe("bridge");
+      expect(res.json().candidates[0].operation.entity).toMatchObject({
+        role: "helper",
+        properties: ["carries"],
+      });
     } finally {
       await app.close();
     }
@@ -147,8 +237,60 @@ describe("live Gemini interpretation", () => {
     const cases: Record<string, unknown> = {
       "not JSON": "here is a bridge!",
       "wrong shape": { bridge: true },
-      "unsupported kind": {
-        candidates: [{ kind: "character", name: "Dragon", confidence: 1 }],
+      "unknown role": {
+        candidates: [
+          {
+            role: "villain",
+            description: "",
+            properties: ["blocks"],
+            name: "Troll",
+            confidence: 1,
+          },
+        ],
+        message: "hi",
+      },
+      "unknown property": {
+        candidates: [
+          {
+            role: "helper",
+            description: "",
+            properties: ["teleports"],
+            name: "Magic door",
+            confidence: 1,
+          },
+        ],
+        message: "hi",
+      },
+      "too many properties": {
+        candidates: [
+          {
+            role: "helper",
+            description: "",
+            properties: [
+              "moves",
+              "flies",
+              "swims",
+              "floats",
+              "carries",
+              "launches",
+              "burns",
+            ],
+            name: "Everything machine",
+            confidence: 1,
+          },
+        ],
+        message: "hi",
+      },
+      "unsupported role for an edit": {
+        candidates: [
+          {
+            role: "character",
+            description: "",
+            properties: ["moves"],
+            name: "Dragon",
+            confidence: 1,
+          },
+        ],
         message: "hi",
       },
       "smuggled operation": {
@@ -158,7 +300,15 @@ describe("live Gemini interpretation", () => {
         message: "hi",
       },
       "confidence out of range": {
-        candidates: [{ kind: "bridge", name: "Bridge", confidence: 7 }],
+        candidates: [
+          {
+            role: "helper",
+            description: "",
+            properties: ["carries"],
+            name: "Bridge",
+            confidence: 7,
+          },
+        ],
         message: "hi",
       },
     };
@@ -166,7 +316,7 @@ describe("live Gemini interpretation", () => {
       it(name, async () => {
         const app = liveApp((async () => geminiReply(payload)) as typeof fetch);
         try {
-          const res = await interpret(app, { entityKind: "bridge" });
+          const res = await interpret(app, { hint: "bridge" });
           expect(res.statusCode).toBe(502);
           expect(res.json()).toMatchObject({
             code: "INVALID_MODEL_OUTPUT",
@@ -183,7 +333,7 @@ describe("live Gemini interpretation", () => {
         (async () => new Response(JSON.stringify({}))) as typeof fetch,
       );
       try {
-        const res = await interpret(app, { entityKind: "bridge" });
+        const res = await interpret(app, { hint: "bridge" });
         expect(res.statusCode).toBe(502);
         expect(res.json().code).toBe("INVALID_MODEL_OUTPUT");
       } finally {
@@ -247,7 +397,7 @@ describe("live Gemini interpretation", () => {
       it(name, async () => {
         const app = liveApp(respond as unknown as typeof fetch);
         try {
-          const res = await interpret(app, { entityKind: "bridge" });
+          const res = await interpret(app, { hint: "bridge" });
           expect(res.statusCode).toBe(status);
           expect(res.json()).toMatchObject({ code, retryable });
           expect(res.body).not.toContain(API_KEY);
@@ -263,7 +413,7 @@ describe("live Gemini interpretation", () => {
     const app = liveApp(fetchMock as unknown as typeof fetch);
     try {
       const res = await interpret(app, {
-        entityKind: "bridge",
+        hint: "bridge",
         image: "https://example.com/drawing.png",
       });
       expect(res.statusCode).toBe(400);
@@ -301,13 +451,14 @@ describe("keyless fixture mode", () => {
         const health = await app.inject({ url: "/api/health" });
         expect(health.json().providerMode).toBe("fixture");
         const res = await interpret(app, {
-          entityKind: "bridge",
+          hint: "bridge",
           changedRegion: region,
         });
         expect(res.statusCode).toBe(200);
         expect(res.json().mode).toBe("fixture");
         expect(res.json().candidates[0].operation.entity).toMatchObject({
-          kind: "bridge",
+          role: "helper",
+          properties: ["carries"],
           bounds: region,
         });
       } finally {

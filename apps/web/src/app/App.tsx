@@ -20,6 +20,7 @@ import type {
   InterpretationInput,
   InterpretationOutput,
 } from "@storyworld/contracts";
+import { isSpanner } from "@storyworld/contracts/entity-traits";
 import { readDrawing } from "../features/canvas/drawing-image";
 import { WorldStage } from "../features/world-renderer/WorldStage";
 import { DrawingCanvas } from "../features/canvas/DrawingCanvas";
@@ -71,7 +72,7 @@ export function FixtureExperience() {
     phase === "reading" ||
     phase === "preview" ||
     phase === "confirming";
-  const [kind, setKind] = useState<"bridge" | "cloud">("bridge");
+  const [hint, setHint] = useState<"bridge" | "cloud">("bridge");
   const [note, setNote] = useState(
     "Draw across both riverbanks to give Nova a way through.",
   );
@@ -129,7 +130,7 @@ export function FixtureExperience() {
         ? pending.fallback
         : confirmed.pathStatus === "available"
           ? "The bridge holds. Nova has a way through."
-          : confirmed.entities.some((entity) => entity.kind === "bridge")
+          : confirmed.entities.some(isSpanner)
             ? "Almost there — the bridge needs to reach both riverbanks."
             : pending.fallback,
     );
@@ -171,7 +172,7 @@ export function FixtureExperience() {
                 : undefined,
             bridge:
               candidate.operation.type === "CREATE_ENTITY" &&
-              candidate.operation.entity.kind === "bridge",
+              isSpanner(candidate.operation.entity),
           };
           await client.apply(candidate.operation);
         }
@@ -223,7 +224,7 @@ export function FixtureExperience() {
     await interpretDrawing({
       changedRegion: bounds,
       image,
-      entityKind: kind,
+      hint,
       transcript,
     });
   }
@@ -336,15 +337,15 @@ export function FixtureExperience() {
               <div>
                 <button
                   className="tool-chip"
-                  aria-pressed={kind === "bridge"}
-                  onClick={() => setKind("bridge")}
+                  aria-pressed={hint === "bridge"}
+                  onClick={() => setHint("bridge")}
                 >
                   <img src={circleXIcon} alt="" /> Bridge
                 </button>
                 <button
                   className="tool-chip"
-                  aria-pressed={kind === "cloud"}
-                  onClick={() => setKind("cloud")}
+                  aria-pressed={hint === "cloud"}
+                  onClick={() => setHint("cloud")}
                 >
                   <img src={cloudIcon} alt="" /> Cloud
                 </button>

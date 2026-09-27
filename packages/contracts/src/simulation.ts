@@ -4,6 +4,12 @@ import {
   type WorldOperation,
   type Entity,
 } from "./model";
+import {
+  blockingObstacle,
+  isSpanner,
+  makesRain,
+  routeBlockers,
+} from "./entity-traits";
 export function initialWorld(id: string): WorldState {
   return {
     id,
@@ -12,20 +18,26 @@ export function initialWorld(id: string): WorldState {
     entities: [
       {
         id: "nova",
-        kind: "character",
+        role: "character",
         name: "Nova",
+        description: "A small explorer who wants to reach the castle.",
+        properties: ["moves"],
         bounds: { x: 150, y: 300, width: 80, height: 70 },
       },
       {
         id: "river",
-        kind: "river",
+        role: "obstacle",
         name: "River",
+        description: "A wide river running across the land.",
+        properties: ["blocks"],
         bounds: { x: 420, y: 0, width: 120, height: 600 },
       },
       {
         id: "castle",
-        kind: "castle",
+        role: "goal",
         name: "Castle",
+        description: "A castle on the far bank.",
+        properties: ["goal"],
         bounds: { x: 740, y: 230, width: 140, height: 150 },
       },
     ],
@@ -58,37 +70,19 @@ function validateEntity(e: Entity) {
     throw new Error("Draw inside the world.");
 }
 export function deriveWorld(state: WorldState): WorldState {
-  const rivers = state.entities.filter((e) => e.kind === "river");
-  const bridges = state.entities.filter((e) => e.kind === "bridge");
   const character = state.entities.find(
     (e) => e.id === state.goal?.characterId,
   );
   const target = state.entities.find((e) => e.id === state.goal?.targetId);
-  let blocked = false;
-  if (character && target)
-    for (const river of rivers) {
-      const b = river.bounds,
-        start = character.bounds.x + character.bounds.width / 2,
-        end = target.bounds.x + target.bounds.width / 2;
-      const between =
-        Math.min(start, end) < b.x && Math.max(start, end) > b.x + b.width;
-      if (
-        between &&
-        !bridges.some(
-          (e) =>
-            e.bounds.x <= b.x &&
-            e.bounds.x + e.bounds.width >= b.x + b.width &&
-            e.bounds.y + e.bounds.height > b.y &&
-            e.bounds.y < b.y + b.height,
-        )
-      )
-        blocked = true;
-    }
   return {
     ...state,
     pathStatus:
-      !character || !target ? "idle" : blocked ? "blocked" : "available",
-    weather: state.entities.some((e) => e.kind === "cloud") ? "rain" : "clear",
+      !character || !target
+        ? "idle"
+        : routeBlockers(state).length > 0
+          ? "blocked"
+          : "available",
+    weather: state.entities.some(makesRain) ? "rain" : "clear",
   };
 }
 export function applyOperation(
@@ -135,7 +129,7 @@ export function applyOperation(
     case "SET_GOAL":
       if (
         !state.entities.some(
-          (e) => e.id === op.characterId && e.kind === "character",
+          (e) => e.id === op.characterId && e.role === "character",
         ) ||
         !state.entities.some((e) => e.id === op.targetId)
       )
@@ -150,16 +144,20 @@ export function applyOperation(
   next = deriveWorld(next);
   return next;
 }
+/** How a new helper left the goal route, naming what still blocks it. */
+function routeNote(state: WorldState) {
+  if (state.pathStatus === "available") return " · route opened";
+  const blocker = blockingObstacle(state);
+  return blocker
+    ? ` · ${blocker.name} still blocks the route`
+    : " · the way is still blocked";
+}
 export function summarize(op: WorldOperation, state: WorldState) {
   if (op.type === "CREATE_ENTITY")
     return (
       op.entity.name +
       " added" +
-      (op.entity.kind === "bridge"
-        ? state.pathStatus === "available"
-          ? " · route opened"
-          : " · river still blocks the route"
-        : "")
+      (isSpanner(op.entity) && state.goal ? routeNote(state) : "")
     );
   return op.type === "REMOVE_ENTITY"
     ? "Object removed"

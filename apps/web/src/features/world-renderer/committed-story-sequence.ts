@@ -4,6 +4,11 @@ import {
   type StoryBeat,
   type StorySequence,
 } from "@storyworld/contracts/story-beat";
+import {
+  blockingObstacle,
+  isSpanner,
+  makesRain,
+} from "@storyworld/contracts/entity-traits";
 
 function beat(
   event: WorldEvent,
@@ -15,7 +20,7 @@ function beat(
 
 function fallbackBeat(event: WorldEvent): StoryBeat | undefined {
   const character = event.state.entities.find(
-    (entity) => entity.kind === "character",
+    (entity) => entity.role === "character",
   );
   const entity = character ?? event.state.entities[0];
   if (!entity) return undefined;
@@ -35,11 +40,11 @@ function openingBeats(event: WorldEvent): StoryBeat[] {
   const { state } = event;
   const character =
     state.entities.find((entity) => entity.id === state.goal?.characterId) ??
-    state.entities.find((entity) => entity.kind === "character");
+    state.entities.find((entity) => entity.role === "character");
   const target = state.entities.find(
     (entity) => entity.id === state.goal?.targetId,
   );
-  const river = state.entities.find((entity) => entity.kind === "river");
+  const river = blockingObstacle(state);
 
   if (character && target && river && state.pathStatus === "blocked")
     return [
@@ -88,15 +93,15 @@ export function sequenceFromCommittedEvents(
 ): StorySequence | null {
   let beats: StoryBeat[] = [];
   const additions = addedEntities(latest.state, previous?.state);
-  const bridge = additions.find((entity) => entity.kind === "bridge");
-  const cloud = additions.find((entity) => entity.kind === "cloud");
+  const bridge = additions.find(isSpanner);
+  const cloud = additions.find(makesRain);
   const character = latest.state.entities.find(
     (entity) => entity.id === latest.state.goal?.characterId,
   );
   const target = latest.state.entities.find(
     (entity) => entity.id === latest.state.goal?.targetId,
   );
-  const river = latest.state.entities.find((entity) => entity.kind === "river");
+  const river = blockingObstacle(latest.state);
 
   if (!previous) {
     beats = openingBeats(latest);
