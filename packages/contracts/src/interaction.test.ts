@@ -289,6 +289,26 @@ describe("interaction API contract", () => {
       { ...response, mode: "fixture" },
       { ...response, odds: 1.2 },
       { ...response, outcome: "teleports" },
+      { ...response, odds: undefined },
+    ])
+      expect(interactionResponseSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it("has no odds, obstacle or route outcome in free play", () => {
+    const freePlay = {
+      mode: "live",
+      outcome: "nothing_happens",
+      odds: null,
+      confidence: 0.8,
+      actorId: "ball",
+      characterId: "fox",
+      obstacleId: null,
+    };
+    expect(interactionResponseSchema.parse(freePlay)).toEqual(freePlay);
+    for (const bad of [
+      { ...freePlay, obstacleId: "river" },
+      { ...freePlay, outcome: "crosses" },
+      { ...freePlay, outcome: "splash" },
     ])
       expect(interactionResponseSchema.safeParse(bad).success).toBe(false);
   });

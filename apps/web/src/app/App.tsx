@@ -29,6 +29,7 @@ import sunIcon from "../assets/figma/sun.svg";
 import scribblesImage from "../assets/figma/scribbles.svg";
 import { InitialAuthoring } from "./InitialAuthoring";
 import { StoryRoom } from "./StoryRoom";
+import { routeLabel } from "./route-label";
 import {
   NEEDS_JEV_NOTE,
   outcomeNote,
@@ -337,11 +338,7 @@ export function FixtureExperience() {
                 </button>
               </div>
               <span className="world-status">
-                {world.pathStatus === "available"
-                  ? "Route opened"
-                  : world.pathStatus === "blocked"
-                    ? "River blocks the route"
-                    : "No route yet"}
+                {routeLabel(world.pathStatus)}
               </span>
             </div>
             <div className="paper" ref={container}>

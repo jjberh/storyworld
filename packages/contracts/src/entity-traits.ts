@@ -53,6 +53,20 @@ type Route = Pick<WorldState, "entities" | "goal"> &
   Partial<Pick<WorldState, "crossings">>;
 
 /**
+ * Whether the world has a goal whose character and target are both present.
+ * Without one there is no route: the world is in free play.
+ */
+export function hasReachableGoal(
+  world: Pick<WorldState, "entities" | "goal">,
+): boolean {
+  return (
+    !!world.goal &&
+    world.entities.some((entity) => entity.id === world.goal?.characterId) &&
+    world.entities.some((entity) => entity.id === world.goal?.targetId)
+  );
+}
+
+/**
  * Everything that `blocks` and lies across the route from the goal's
  * character to its target, crossed or not. Nearest to the character first;
  * empty without a goal. `excluding` leaves one entity out (the drawing

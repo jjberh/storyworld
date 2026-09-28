@@ -189,10 +189,28 @@ const LIFT_THRESHOLD = 8;
  * frame, so the reveal barely moves while it is caught. The clock runs freely
  * again once the reveal is done.
  */
+/**
+ * Holds the page clock (installed before the room opened) as soon as
+ * possible. `pauseAt` only accepts a future time, and on a busy machine the
+ * page's "now" can pass a chosen moment before the call lands, so aim just
+ * ahead of it and try again if it slipped into the past.
+ */
+async function holdClockNow(page: Page) {
+  for (let attempt = 0; ; attempt++) {
+    const now = await page.evaluate(() => Date.now());
+    try {
+      await page.clock.pauseAt(now + 100);
+      return;
+    } catch (error) {
+      if (attempt >= 9 || !/past/i.test(String(error))) throw error;
+    }
+  }
+}
+
 async function castlePosesDuringReveal(page: Page) {
   // The stage has drawn the castle at least once.
   await expect.poll(() => castlePose(page)).not.toBeNull();
-  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
+  await holdClockNow(page);
   const samples: (Pose & { state: string | null })[] = [];
   const castleState = () =>
     page.evaluate(() =>

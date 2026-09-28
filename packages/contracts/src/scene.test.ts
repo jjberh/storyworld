@@ -42,6 +42,35 @@ describe("confirmed scene initialization", () => {
     expect(world.rules).toEqual([]);
     expect(world.goal).toBeNull();
   });
+  it("accepts a scene with no place to reach, which starts in free play", () => {
+    const tree = {
+      ...scene.objects[0],
+      id: "tree",
+      name: "Tree",
+      role: "scenery" as const,
+      properties: [],
+      imageBounds: { x: 0.5, y: 0.2, width: 0.2, height: 0.4 },
+    };
+    const noGoal = { ...scene, objects: [...scene.objects, tree] };
+    expect(confirmedSceneSchema.parse(noGoal)).toEqual(noGoal);
+    const world = worldFromScene("free-world", noGoal);
+    expect(world.goal).toBeNull();
+    expect(world.pathStatus).toBe("free_play");
+    // Exactly one character is still required, goal or not.
+    expect(
+      confirmedSceneSchema.safeParse({ ...noGoal, objects: [tree] }).success,
+    ).toBe(false);
+    expect(
+      confirmedSceneSchema.safeParse({
+        ...noGoal,
+        objects: [...noGoal.objects, { ...scene.objects[0], id: "fox-2" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      confirmedSceneSchema.safeParse({ ...noGoal, characterId: "tree" })
+        .success,
+    ).toBe(false);
+  });
   it("rejects invalid references, duplicate IDs, extra characters and out-of-image boxes", () => {
     for (const invalid of [
       { ...scene, goalId: "fox" },

@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 
-type Entity = { id: string; properties: string[] };
+type Entity = { id: string; role: string; properties: string[] };
 
 /**
  * How long to wait for a story moment to reach the stage. Beats hold 2 to 4 s,
@@ -61,7 +61,8 @@ export async function waitForReveal(page: Page) {
 /**
  * Stands in for Jev: answers POST /api/interactions with `outcome` (or the
  * outcome `pick` chooses for the new drawing) for whatever drawing the page
- * asks about. Returns the entity IDs it was asked about.
+ * asks about. In free play (no goal) it answers with no odds and no
+ * obstacle, as the server does. Returns the entity IDs it was asked about.
  */
 export async function mockJev(
   page: Page,
@@ -79,15 +80,19 @@ export async function mockJev(
     const entity = body.world.entities.find(
       (item) => item.id === body.entityId,
     )!;
+    const freePlay = body.world.goal === null;
     await route.fulfill({
       json: {
         mode: "live",
         outcome: typeof pick === "string" ? pick : pick(entity),
-        odds: 0.8,
+        odds: freePlay ? null : 0.8,
         confidence: 0.9,
         actorId: body.entityId,
-        characterId: body.world.goal?.characterId ?? null,
-        obstacleId: "river",
+        characterId:
+          body.world.goal?.characterId ??
+          body.world.entities.find((item) => item.role === "character")?.id ??
+          null,
+        obstacleId: freePlay ? null : "river",
       },
     });
   });

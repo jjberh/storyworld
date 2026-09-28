@@ -8,7 +8,11 @@ import {
   blockingObstacle,
   makesRain,
 } from "@storyworld/contracts/entity-traits";
-import { interactionBeats } from "@storyworld/contracts/interaction-story";
+import {
+  freePlayOpeningBeats,
+  freePlaySpotBeat,
+  interactionBeats,
+} from "@storyworld/contracts/interaction-story";
 
 function beat(
   event: WorldEvent,
@@ -45,6 +49,13 @@ function openingBeats(event: WorldEvent): StoryBeat[] {
     (entity) => entity.id === state.goal?.targetId,
   );
   const river = blockingObstacle(state);
+
+  // Free play: no goal to head for, so the character explores instead.
+  if (state.pathStatus === "free_play") {
+    const beats = freePlayOpeningBeats(state);
+    if (beats.length > 0)
+      return beats.map((input, index) => beat(event, index, input));
+  }
 
   if (character && target && river && state.pathStatus === "blocked")
     return [
@@ -104,6 +115,11 @@ export function sequenceFromCommittedEvents(
     (entity) => entity.id === latest.state.goal?.targetId,
   );
   const river = blockingObstacle(latest.state);
+  // In free play the character notices what was just added.
+  const spots = (thing: (typeof additions)[number]) =>
+    latest.state.pathStatus === "free_play"
+      ? freePlaySpotBeat(latest.state, thing)
+      : undefined;
 
   if (!previous) {
     beats = openingBeats(latest);
@@ -131,6 +147,8 @@ export function sequenceFromCommittedEvents(
         },
       }),
     ];
+    const spotted = spots(cloud);
+    if (spotted) beats.push(beat(latest, 2, spotted));
   } else if (additions[0]) {
     beats = [
       beat(latest, 0, {
@@ -139,6 +157,8 @@ export function sequenceFromCommittedEvents(
         action: { type: "reveal", entityId: additions[0].id },
       }),
     ];
+    const spotted = spots(additions[0]);
+    if (spotted) beats.push(beat(latest, 1, spotted));
   } else {
     if (latest.state.pathStatus === "blocked" && character && target && river)
       beats = [

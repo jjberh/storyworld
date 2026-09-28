@@ -96,6 +96,12 @@ try {
     ).entities.map((e: { id: string }) => e.id),
     ["fox"],
   );
+  // A scene with no place to reach starts in free play.
+  assert.equal(
+    JSON.parse(guest.db.worldEvent.id.find(sceneId + ":0")!.snapshot)
+      .pathStatus,
+    "free_play",
+  );
   await assert.rejects(() => guest.reducers.initializeScene(sceneArgs));
   await assert.rejects(() =>
     director.reducers.initializeScene({
@@ -103,6 +109,67 @@ try {
       scene: JSON.stringify({ ...scene, openingNarration: "Different" }),
     }),
   );
+  // Free play: a new drawing still gets its moment, with no odds (Jev is not
+  // asked about a goal) and no route outcome, and the world stays in free play.
+  await director.reducers.applyOperationCommand({
+    worldId: sceneId,
+    expectedRevision: 0,
+    requestId: "free-play-ball",
+    operation: JSON.stringify({
+      type: "CREATE_ENTITY",
+      entity: {
+        id: "ball",
+        role: "helper",
+        name: "Ball",
+        description: "",
+        properties: [],
+        bounds: { x: 400, y: 300, width: 60, height: 60 },
+      },
+    }),
+  });
+  await until(() => guest.db.world.id.find(sceneId)?.revision === 1);
+  const freePlayOutcome = (outcome: string, odds: number | null) =>
+    JSON.stringify({
+      type: "RESOLVE_INTERACTION",
+      entityId: "ball",
+      outcome,
+      odds,
+      confidence: 0.8,
+      obstacleId: null,
+    });
+  for (const [requestId, operation] of [
+    ["free-play-odds", freePlayOutcome("nothing_happens", 0.5)],
+    ["free-play-crossing", freePlayOutcome("crosses", null)],
+    ["free-play-splash", freePlayOutcome("splash", null)],
+  ] as const)
+    await assert.rejects(() =>
+      director.reducers.applyOperationCommand({
+        worldId: sceneId,
+        expectedRevision: 1,
+        requestId,
+        operation,
+      }),
+    );
+  await director.reducers.applyOperationCommand({
+    worldId: sceneId,
+    expectedRevision: 1,
+    requestId: "free-play-outcome",
+    operation: freePlayOutcome("nothing_happens", null),
+  });
+  await until(() => guest.db.world.id.find(sceneId)?.revision === 2);
+  const played = guest.db.worldEvent.id.find(sceneId + ":2")!;
+  const playedState = JSON.parse(played.snapshot);
+  assert.equal(playedState.pathStatus, "free_play");
+  assert.equal(playedState.goal, null);
+  assert.deepEqual(playedState.interaction, {
+    entityId: "ball",
+    outcome: "nothing_happens",
+    odds: null,
+    confidence: 0.8,
+    obstacleId: null,
+    revision: 2,
+  });
+  assert.equal(played.summary, "Ball: a new friend");
   await director.reducers.createWorld({ worldId });
   await guest.reducers.joinWorld({ worldId });
   await until(() => !!guest.db.world.id.find(worldId));
@@ -352,7 +419,7 @@ try {
     );
   assert.equal(guest.db.world.id.find(worldId)?.revision, 7);
   console.log(
-    "PASS: schema version stamped; independent clients synchronize; unauthorized/stale edits rejected; interaction outcomes (failure keeps the route blocked, success opens it, impossible, repeated, self-crossing and guest-proposed outcomes refused, blockers cannot be removed, crossing reloaded); proposal approval/rejection, idempotency, and rewind verified.",
+    "PASS: schema version stamped; free-play scene (no goal, null odds, route outcomes refused); independent clients synchronize; unauthorized/stale edits rejected; interaction outcomes (failure keeps the route blocked, success opens it, impossible, repeated, self-crossing and guest-proposed outcomes refused, blockers cannot be removed, crossing reloaded); proposal approval/rejection, idempotency, and rewind verified.",
   );
 } finally {
   director.disconnect();

@@ -136,6 +136,37 @@ describe("scene review", () => {
     expect(scene.success).toBe(true);
   });
 
+  it("starts with a character and no place to reach", () => {
+    const tree = candidate("tree", "scenery", 0.95);
+    const review = startReview([fox, tree]);
+    expect(reviewBlocker(review)).toBeUndefined();
+    // Retyping the only place to reach away leaves Start enabled too.
+    expect(
+      reviewBlocker(
+        run(startReview([fox, castle]), {
+          type: "answer",
+          id: "castle",
+          role: "scenery",
+        }),
+      ),
+    ).toBeUndefined();
+    const scene = confirmedSceneSchema.safeParse({
+      document: {
+        sourceImage: "picture",
+        drawing: { strokes: [], compositeImage: "picture" },
+      },
+      mode: "live",
+      objects: review.objects,
+      characterId: "fox",
+      openingNarration: "Fox explores.",
+      moodHints: ["curious"],
+    });
+    expect(scene.success).toBe(true);
+    expect(scene.data?.goalId).toBeUndefined();
+    // Still exactly one character.
+    expect(reviewBlocker(startReview([tree]))).toBe("no-character");
+  });
+
   it("a missed object waits for its answer", () => {
     const missed = { ...candidate("object-2", "scenery", 1), name: "New" };
     const review = run(startReview([fox]), {
