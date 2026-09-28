@@ -161,6 +161,8 @@ export async function recordKeepsake(
     interactive: false,
     canvasCaptions: true,
     minBeatHoldMs: KEEPSAKE_BEAT_MS,
+    maxBeatHoldMs: script.maxBeatMs,
+    realTimeClock: true,
     reducedMotion: options.reducedMotion,
     resolution: 1,
     width: MOVIE_WIDTH,
@@ -198,11 +200,11 @@ export async function recordKeepsake(
       };
     });
 
-    // Beats run on the stage clock so their animation is exact, but the video
-    // runs on real time. On a janky device the stage clock falls behind (its
-    // ticker caps each frame), so holds are measured in real time from the
-    // moment recording started: they shrink to absorb any overrun and keep
-    // the file within 10–15 s where the beats themselves allow it.
+    // Beats run on the stage clock, which here follows real time even on
+    // slow frames, so the video keeps the script's pace. Each wait still ends
+    // on a frame, a little late, so holds are measured in real time from the
+    // moment recording started: they shrink to absorb that overrun and keep
+    // the file within 10–15 s.
     let wallStart = performance.now();
     const lastStep = script.steps.at(-1);
     const playStep = (step: KeepsakeStep) => {

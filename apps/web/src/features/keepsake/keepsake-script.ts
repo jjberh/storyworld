@@ -14,8 +14,18 @@ import type { StageTitleCard } from "../world-renderer/story-stage-renderer";
 
 export const MIN_MOVIE_MS = 10_000;
 export const MAX_MOVIE_MS = 15_000;
-/** Beats hold at least this long in the movie so captions stay readable. */
+/**
+ * The script plans within this, leaving the recorder room for the frames it
+ * records before the first step and after the end card.
+ */
+export const PLANNED_MAX_MS = MAX_MOVIE_MS - 500;
+/**
+ * Beats hold at least this long in the movie so captions stay readable, and
+ * no shorter than their live hold unless the movie would run too long.
+ */
 export const KEEPSAKE_BEAT_MS = 1400;
+/** How finely the planner shortens long beat holds to fit the budget. */
+const BEAT_CAP_STEP_MS = 50;
 /** The end card's scripted length. The recorder may shorten it in real time
  * (to absorb a slow device) but never below `MIN_END_CARD_MS`. */
 export const END_CARD_MS = 1800;
@@ -55,6 +65,12 @@ export type KeepsakeScript = {
   totalMs: number;
   /** The event chosen as the best story moment, if any. */
   momentEventId: string | undefined;
+  /**
+   * The longest a beat holds in this movie (at least `KEEPSAKE_BEAT_MS`), or
+   * undefined when every beat keeps its live hold. The recorder passes it to
+   * the stage so beats play exactly as long as planned.
+   */
+  maxBeatMs: number | undefined;
 };
 
 export type KeepsakeHistory = {
@@ -112,18 +128,67 @@ export function pickBestMoment(
   return best?.index;
 }
 
+/**
+ * How long one beat holds in the movie: its live hold, at least
+ * `KEEPSAKE_BEAT_MS`, and at most `maxBeatMs` when the budget needs it.
+ */
+export function keepsakeBeatMs(
+  action: StoryAction,
+  reducedMotion = false,
+  maxBeatMs = Infinity,
+) {
+  return Math.min(
+    Math.max(beatHoldMs(action, reducedMotion), KEEPSAKE_BEAT_MS),
+    Math.max(maxBeatMs, KEEPSAKE_BEAT_MS),
+  );
+}
+
 /** How long a sequence plays in the movie, in milliseconds. */
 export function sequenceDurationMs(
   sequence: StorySequence,
   reducedMotion = false,
+  maxBeatMs?: number,
 ) {
   return sequence.beats.reduce(
     (total, item) =>
       total +
-      Math.max(beatHoldMs(item.action, reducedMotion), KEEPSAKE_BEAT_MS) +
+      keepsakeBeatMs(item.action, reducedMotion, maxBeatMs) +
       (item.action.type === "reveal" && !reducedMotion ? REVEAL_FRAMES_MS : 0),
     0,
   );
+}
+
+/**
+ * Fits whole sequences into `budgetMs` by shortening the longest beat holds,
+ * never below `KEEPSAKE_BEAT_MS`. Returns the beat cap to use (undefined when
+ * every beat keeps its hold), or null when they do not fit even then. Beats
+ * are shortened, never cut: each still plays its whole (shorter) hold.
+ */
+export function fitBeats(
+  sequences: readonly StorySequence[],
+  budgetMs: number,
+  reducedMotion = false,
+): { maxBeatMs: number | undefined } | null {
+  const total = (maxBeatMs?: number) =>
+    sequences.reduce(
+      (sum, item) => sum + sequenceDurationMs(item, reducedMotion, maxBeatMs),
+      0,
+    );
+  if (total() <= budgetMs) return { maxBeatMs: undefined };
+  const longest = Math.max(
+    ...sequences.flatMap((item) =>
+      item.beats.map((beat) => keepsakeBeatMs(beat.action, reducedMotion)),
+    ),
+  );
+  for (
+    let cap = longest - BEAT_CAP_STEP_MS;
+    cap > KEEPSAKE_BEAT_MS;
+    cap -= BEAT_CAP_STEP_MS
+  )
+    if (total(cap) <= budgetMs) return { maxBeatMs: cap };
+  return total(KEEPSAKE_BEAT_MS) <= budgetMs
+    ? { maxBeatMs: KEEPSAKE_BEAT_MS }
+    : null;
 }
 
 /**
@@ -163,10 +228,12 @@ export function movieTitle(heroName: string | undefined) {
  * (`pickBestMoment`), starting from the world before it. Then an idle hold
  * and an end card fill the movie to at least 10 s.
  *
- * No trimming is needed to stay under 15 s: a sequence has at most three
- * beats (the contract's cap), so the longest script is a 3.25 s intro, two
- * 4.35 s sequences and the 1.8 s end card, under 14 s (a unit test pins
- * this). A sequence is never cut mid-beat.
+ * The length is planned up front to fit `PLANNED_MAX_MS`, from the stage's
+ * own beat holds: if the sequences would run too long, the longest holds are
+ * shortened toward `KEEPSAKE_BEAT_MS` (`fitBeats`), and if that is not
+ * enough the opening sequence is dropped. The moment alone always fits: a
+ * sequence has at most three beats (the contract's cap), under 4.5 s at the
+ * shortest hold, after an intro of at most 3.25 s. No beat is cut mid-way.
  */
 export function buildKeepsakeScript(
   history: KeepsakeHistory,
@@ -181,11 +248,24 @@ export function buildKeepsakeScript(
     momentIndex === undefined ? undefined : events[momentIndex];
   const moment = momentEvent ? sequences.get(momentEvent.id) : undefined;
   const played = sequences.get(first.id);
-  const opening = played && openingAfterIntro(played);
+  let opening = played && openingAfterIntro(played);
 
   const introMs = introDurationMs(first.state.entities.length);
-  const openingMs = opening ? sequenceDurationMs(opening, reducedMotion) : 0;
-  const momentMs = moment ? sequenceDurationMs(moment, reducedMotion) : 0;
+  const budgetMs = PLANNED_MAX_MS - introMs - END_CARD_MS;
+  const plays = () =>
+    [opening, moment].filter((item): item is StorySequence => !!item);
+  let fit = fitBeats(plays(), budgetMs, reducedMotion);
+  if (!fit && opening) {
+    opening = undefined;
+    fit = fitBeats(plays(), budgetMs, reducedMotion);
+  }
+  const maxBeatMs = fit ? fit.maxBeatMs : KEEPSAKE_BEAT_MS;
+  const openingMs = opening
+    ? sequenceDurationMs(opening, reducedMotion, maxBeatMs)
+    : 0;
+  const momentMs = moment
+    ? sequenceDurationMs(moment, reducedMotion, maxBeatMs)
+    : 0;
 
   const steps: KeepsakeStep[] = [];
   let at = 0;
@@ -245,5 +325,6 @@ export function buildKeepsakeScript(
     steps,
     totalMs: at,
     momentEventId: momentEvent?.id,
+    maxBeatMs,
   };
 }
