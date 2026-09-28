@@ -9,6 +9,7 @@ const pixi = vi.hoisted(() => {
   const state = {
     apps: [] as FakeApplication[],
     textures: [] as FakeTexture[],
+    sources: [] as FakeBufferImageSource[],
     initResult: "resolve" as "resolve" | "reject" | "defer",
   };
 
@@ -90,9 +91,19 @@ const pixi = vi.hoisted(() => {
       this.destroyed = true;
     }
   }
+  class FakeBufferImageSource {
+    destroyed = false;
+    constructor(public options: { width: number; height: number }) {
+      state.sources.push(this);
+    }
+    destroy() {
+      this.destroyed = true;
+    }
+  }
   class FakeSprite extends FakeContainer {
     width = 0;
     height = 0;
+    tint = 0xffffff;
     constructor(public texture: FakeTexture) {
       super();
     }
@@ -135,6 +146,7 @@ const pixi = vi.hoisted(() => {
     state,
     module: {
       Application: FakeApplication,
+      BufferImageSource: FakeBufferImageSource,
       Container: FakeContainer,
       Graphics: FakeGraphics,
       ImageSource: class {
@@ -156,6 +168,24 @@ const pixi = vi.hoisted(() => {
 });
 
 vi.mock("pixi.js", () => pixi.module);
+
+// The drawing's pixels, as the stage reads them; null (the default, as in a
+// browser that cannot read them) leaves every piece a plain rectangle.
+const drawingPixels = vi.hoisted(() => ({
+  image: null as null | {
+    data: Uint8ClampedArray;
+    width: number;
+    height: number;
+  },
+  reads: 0,
+}));
+vi.mock("./cutouts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./cutouts")>()),
+  readImagePixels: () => {
+    drawingPixels.reads++;
+    return drawingPixels.image;
+  },
+}));
 
 const { INITIAL_CAPTION, StoryStageRenderer } =
   await import("./story-stage-renderer");
@@ -182,7 +212,10 @@ let images: FakeImage[] = [];
 beforeEach(() => {
   pixi.state.apps = [];
   pixi.state.textures = [];
+  pixi.state.sources = [];
   pixi.state.initResult = "resolve";
+  drawingPixels.image = null;
+  drawingPixels.reads = 0;
   images = [];
   vi.stubGlobal("window", {
     devicePixelRatio: 2,
@@ -345,6 +378,168 @@ describe("StoryStageRenderer lifecycle", () => {
     stage.destroy();
     await flush();
     expect(pixi.state.textures.every((item) => item.destroyed)).toBe(true);
+  });
+});
+
+describe("StoryStageRenderer paper cutouts", () => {
+  /** White paper with a crayon ring in the fox's box, the rest blank. */
+  function drawing() {
+    const width = 1000;
+    const height = 600;
+    const data = new Uint8ClampedArray(width * height * 4).fill(255);
+    for (let y = 150; y < 210; y++)
+      for (let x = 150; x < 250; x++) {
+        const edge = y < 154 || y >= 206 || x < 154 || x >= 246;
+        if (!edge) continue;
+        const offset = (y * width + x) * 4;
+        data[offset] = 221;
+        data[offset + 1] = 133;
+        data[offset + 2] = 92;
+      }
+    return { data, width, height };
+  }
+  /** Each test uses its own drawing so cuts cached by another never apply. */
+  let drawings = 0;
+  function cutScene() {
+    drawings++;
+    return {
+      ...scene,
+      document: {
+        drawing: { compositeImage: `data:image/png;base64,CUT${drawings}` },
+      },
+    } as unknown as ConfirmedScene;
+  }
+  const pieceSprites = (stage: InstanceType<typeof StoryStageRenderer>) =>
+    stage.entityObject("fox")!.children.filter((child) => "texture" in child);
+  /** Loads the drawing and waits until its pieces are cut. */
+  async function loadDrawing(
+    stage: InstanceType<typeof StoryStageRenderer>,
+    image: FakeImage,
+  ) {
+    image.onload?.();
+    await vi.waitFor(() =>
+      expect(stage.getSnapshot().imageStatus).toBe("loaded"),
+    );
+  }
+  const cutouts = (stage: InstanceType<typeof StoryStageRenderer>) =>
+    Object.fromEntries(
+      stage.getSnapshot().entities.map((entity) => [entity.id, entity.cutout]),
+    );
+
+  it("cuts a drawn piece along its strokes and leaves a blank one a rectangle", async () => {
+    drawingPixels.image = drawing();
+    const stage = new StoryStageRenderer({ scene: cutScene(), world: world() });
+    await stage.ready;
+    expect(cutouts(stage)).toEqual({
+      fox: "pending",
+      river: "pending",
+      castle: "pending",
+    });
+    await loadDrawing(stage, images[0]!);
+    expect(cutouts(stage)).toEqual({
+      fox: "mask",
+      river: "rect",
+      castle: "rect",
+    });
+    // The drawing is read once for every piece.
+    expect(drawingPixels.reads).toBe(1);
+    // The fox is its sticker over three shadow layers of the same shape.
+    const sprites = pieceSprites(stage) as unknown as { tint: number }[];
+    expect(sprites).toHaveLength(4);
+    expect(
+      sprites.slice(0, 3).every((sprite) => sprite.tint !== 0xffffff),
+    ).toBe(true);
+    expect(pixi.state.sources).toHaveLength(1);
+    stage.destroy();
+    await flush();
+  });
+
+  it("frees a cut piece's textures when it leaves and when the stage goes", async () => {
+    drawingPixels.image = drawing();
+    const stage = new StoryStageRenderer({ scene: cutScene(), world: world() });
+    await stage.ready;
+    await loadDrawing(stage, images[0]!);
+    const [source] = pixi.state.sources;
+    // Redrawing the same world keeps the upload.
+    stage.setWorld(world());
+    expect(source!.destroyed).toBe(false);
+    expect(pixi.state.sources).toHaveLength(1);
+    stage.setWorld(world([river, castle]));
+    expect(source!.destroyed).toBe(true);
+    stage.setWorld(world());
+    stage.destroy();
+    await flush();
+    expect(pixi.state.sources.every((item) => item.destroyed)).toBe(true);
+    expect(pixi.state.textures.every((item) => item.destroyed)).toBe(true);
+  });
+
+  it("shares cuts between stages showing the same drawing", async () => {
+    drawingPixels.image = drawing();
+    const shared = cutScene();
+    const first = new StoryStageRenderer({ scene: shared, world: world() });
+    await loadDrawing(first, images[0]!);
+    const second = new StoryStageRenderer({ scene: shared, world: world() });
+    images[1]!.onload?.();
+    // Every cut is already made, so the second stage shows them at once.
+    expect(second.getSnapshot().imageStatus).toBe("loaded");
+    expect(drawingPixels.reads).toBe(1);
+    expect(cutouts(second).fox).toBe("mask");
+    first.destroy();
+    second.destroy();
+    await flush();
+  });
+
+  it("stays loading until every piece is cut, yielding between pieces", async () => {
+    drawingPixels.image = drawing();
+    vi.useFakeTimers();
+    let now = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => {
+      now += 10; // Every piece blows the time budget.
+      return now;
+    });
+    try {
+      const stage = new StoryStageRenderer({
+        scene: cutScene(),
+        world: world(),
+      });
+      images[0]!.onload?.();
+      expect(stage.getSnapshot().imageStatus).toBe("loading");
+      // One piece per turn of the event loop.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stage.getSnapshot().imageStatus).toBe("loading");
+      for (let turn = 0; turn < 5; turn++)
+        if (stage.getSnapshot().imageStatus === "loading")
+          await vi.advanceTimersByTimeAsync(1);
+      expect(stage.getSnapshot().imageStatus).toBe("loaded");
+      expect(cutouts(stage).fox).toBe("mask");
+      // A stage destroyed mid-cut stops cutting.
+      const stopped = new StoryStageRenderer({
+        scene: cutScene(),
+        world: world(),
+      });
+      images[1]!.onload?.();
+      stopped.destroy();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(stopped.getSnapshot().imageStatus).toBe("loading");
+      stage.destroy();
+    } finally {
+      clock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows every piece as a rectangle when the drawing cannot be read", async () => {
+    const stage = new StoryStageRenderer({ scene: cutScene(), world: world() });
+    await stage.ready;
+    images[0]!.onload?.();
+    expect(cutouts(stage)).toEqual({
+      fox: "rect",
+      river: "rect",
+      castle: "rect",
+    });
+    expect(pixi.state.sources).toHaveLength(0);
+    stage.destroy();
+    await flush();
   });
 });
 
