@@ -595,6 +595,24 @@ describe("StoryStageRenderer recording features", () => {
     stage.destroy();
   });
 
+  it("caps beats at maxBeatHoldMs and lets a recording's clock follow real time", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world(),
+      maxBeatHoldMs: 300,
+      realTimeClock: true,
+    });
+    await stage.ready;
+    // Slow frames are not capped at Pixi's default 100 ms.
+    expect(pixi.state.apps.at(-1)!.ticker).toMatchObject({ minFPS: 1 });
+    void stage.playSequence(sequence, new AbortController().signal);
+    await run(250);
+    expect(stage.getSnapshot().caption).toBe("Fox sets off.");
+    await run(100);
+    expect(stage.getSnapshot().caption).toBe("River stops the way.");
+    stage.destroy();
+  });
+
   it("shows a sequence's world with its revealed piece hidden from the start", async () => {
     const stage = new StoryStageRenderer({
       scene,

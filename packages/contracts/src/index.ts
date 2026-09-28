@@ -60,13 +60,24 @@ export const sceneCandidateSchema = z
     imageBounds: imageBoundsSchema,
   })
   .strict();
+/**
+ * Scene candidates the model is at least this sure of are accepted without a
+ * question; only the rest are asked about on the picture. Gemini is generous
+ * with confidence: in live checks clearly drawn objects scored 0.95 while
+ * guesses at unclear shapes scored 0.75 to 0.85 (and up to 0.95 before the
+ * scene prompt named this line). A lower, more intuitive line such as 0.75
+ * would almost never ask, so it sits at 0.9.
+ */
+export const SCENE_AUTO_ACCEPT_CONFIDENCE = 0.9;
 export const sceneInterpretationResponseSchema = z
   .object({
     mode: z.enum(["fixture", "live"]),
     message: z.string().min(1).max(200),
     candidates: z.array(sceneCandidateSchema).min(1).max(8),
     openingNarration: z.string().min(1).max(600),
-    characterCandidateId: z.string().min(1).max(80),
+    // Absent only when no candidate is a character; the child then taps or
+    // draws their hero before the scene can be confirmed.
+    characterCandidateId: z.string().min(1).max(80).optional(),
     goalCandidateId: z.string().min(1).max(80).optional(),
     moodHints: z.array(storyMoodSchema).min(1).max(3),
   })
@@ -81,11 +92,22 @@ export const sceneInterpretationResponseSchema = z
         path: ["candidates"],
         message: "Candidate IDs must be unique",
       });
-    if (candidatesById.get(response.characterCandidateId)?.role !== "character")
+    if (response.characterCandidateId) {
+      if (
+        candidatesById.get(response.characterCandidateId)?.role !== "character"
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["characterCandidateId"],
+          message: "Character reference must identify a character candidate",
+        });
+    } else if (
+      response.candidates.some((candidate) => candidate.role === "character")
+    )
       context.addIssue({
         code: "custom",
         path: ["characterCandidateId"],
-        message: "Character reference must identify a character candidate",
+        message: "A character candidate needs a character reference",
       });
     if (
       response.goalCandidateId &&

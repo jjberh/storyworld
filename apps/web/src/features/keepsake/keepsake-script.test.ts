@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   Entity,
   WorldEvent,
@@ -9,19 +9,43 @@ import type {
   StorySequence,
 } from "@storyworld/contracts/story-beat";
 import { introDurationMs } from "../world-renderer/intro-motion";
+import { beatHoldMs } from "../world-renderer/story-playback";
 import {
   buildKeepsakeScript,
   END_CARD_MS,
+  fitBeats,
   KEEPSAKE_BEAT_MS,
+  keepsakeBeatMs,
   MAX_MOVIE_MS,
   MIN_MOVIE_MS,
   momentScore,
   movieTitle,
   openingAfterIntro,
   pickBestMoment,
+  PLANNED_MAX_MS,
   sequenceDurationMs,
   type KeepsakeScript,
 } from "./keepsake-script";
+
+// The real beat holds, unless a test stands in longer ones.
+vi.mock("../world-renderer/story-playback", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../world-renderer/story-playback")>();
+  return { ...actual, beatHoldMs: vi.fn(actual.beatHoldMs) };
+});
+const { beatHoldMs: liveBeatHoldMs } = await vi.importActual<
+  typeof import("../world-renderer/story-playback")
+>("../world-renderer/story-playback");
+afterEach(() => {
+  vi.mocked(beatHoldMs).mockImplementation(liveBeatHoldMs);
+});
+
+/** Live beats that hold 2–4 s, as a later change will make them. */
+function growHolds() {
+  vi.mocked(beatHoldMs).mockImplementation((action, reducedMotion) =>
+    reducedMotion ? 40 : action.type === "celebrate" ? 4000 : 2500,
+  );
+}
 
 const fox: Entity = {
   id: "fox",
@@ -338,6 +362,33 @@ describe("buildKeepsakeScript", () => {
   });
 });
 
+describe("fitBeats", () => {
+  const long = sequence(opening, [
+    { type: "celebrate", entityId: "fox" },
+    { type: "focus", entityId: "fox" },
+  ]);
+
+  it("leaves holds alone when they fit", () => {
+    growHolds();
+    expect(fitBeats([long], 6500)).toEqual({ maxBeatMs: undefined });
+  });
+
+  it("shortens the longest holds first, never below the keepsake hold", () => {
+    growHolds();
+    // 4000 + 2500 does not fit 5000; a 2500 cap gives 5000.
+    const fit = fitBeats([long], 5000)!;
+    expect(fit.maxBeatMs).toBe(2500);
+    expect(sequenceDurationMs(long, false, fit.maxBeatMs)).toBe(5000);
+    expect(keepsakeBeatMs(long.beats[1].action, false, 100)).toBe(
+      KEEPSAKE_BEAT_MS,
+    );
+    expect(fitBeats([long], 2 * KEEPSAKE_BEAT_MS)).toEqual({
+      maxBeatMs: KEEPSAKE_BEAT_MS,
+    });
+    expect(fitBeats([long], 2 * KEEPSAKE_BEAT_MS - 1)).toBeNull();
+  });
+});
+
 describe("openingAfterIntro", () => {
   it("turns opening reveals into focus beats so lifted pieces never blink", () => {
     const revealing = sequence(opening, [
@@ -361,6 +412,105 @@ describe("openingAfterIntro", () => {
 });
 
 describe("the 15 second ceiling", () => {
+  const crowd = Array.from({ length: 200 }, (_, index) => ({
+    ...castle,
+    id: `piece-${index}`,
+  }));
+  const first = event(0, [fox, ...crowd]);
+  const second = event(1, [fox, ...crowd, bridge]);
+  const threeBeats = (item: WorldEvent) =>
+    sequence(item, [
+      { type: "reveal", entityId: "fox" },
+      { type: "move_toward", entityId: "fox", targetId: "castle" },
+      { type: "celebrate", entityId: "fox" },
+    ]);
+
+  /** Every play step lasts exactly its beats at the script's beat cap. */
+  function expectWholeBeats(script: KeepsakeScript) {
+    for (const step of script.steps)
+      if (step.kind === "play")
+        expect(step.durationMs).toBe(
+          sequenceDurationMs(step.sequence, false, script.maxBeatMs),
+        );
+  }
+
+  it("keeps today's beat holds: the longest script already fits", () => {
+    const script = buildKeepsakeScript({
+      events: [first, second],
+      sequences: sequences(threeBeats(first), threeBeats(second)),
+    })!;
+    expect(script.maxBeatMs).toBeUndefined();
+    expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
+  });
+
+  it("shortens long live holds to fit a crowded drawing, a 3-beat opening and a 3-beat moment", () => {
+    growHolds();
+    const script = buildKeepsakeScript({
+      events: [first, second],
+      sequences: sequences(threeBeats(first), threeBeats(second)),
+    })!;
+    expectContiguous(script);
+    expectWholeBeats(script);
+    // Both sequences still play, every beat whole and readable.
+    expect(script.steps.map((step) => step.kind)).toEqual([
+      "intro",
+      "play",
+      "play",
+      "hold",
+    ]);
+    expect(script.maxBeatMs).toBeGreaterThanOrEqual(KEEPSAKE_BEAT_MS);
+    expect(script.maxBeatMs).toBeLessThan(2500);
+    expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
+    expect(script.totalMs).toBeGreaterThanOrEqual(MIN_MOVIE_MS);
+    expect(script.steps.at(-1)).toMatchObject({ durationMs: END_CARD_MS });
+  });
+
+  it("keeps long live holds when a small drawing leaves room", () => {
+    growHolds();
+    const small = event(0, [fox, river, castle]);
+    const next = event(1, [fox, river, castle, bridge]);
+    const script = buildKeepsakeScript({
+      events: [small, next],
+      sequences: sequences(
+        sequence(small, [{ type: "focus", entityId: "fox" }]),
+        sequence(next, [{ type: "celebrate", entityId: "fox" }]),
+      ),
+    })!;
+    expect(script.maxBeatMs).toBeUndefined();
+    const moment = script.steps.find(
+      (step) => step.kind === "play" && step.role === "moment",
+    );
+    expect(moment?.durationMs).toBe(4000);
+  });
+
+  it("drops the opening when even the shortest holds overrun", () => {
+    growHolds();
+    // Longer than the contract allows, to force the fallback.
+    const longOpening = sequence(
+      first,
+      Array.from({ length: 6 }, () => ({
+        type: "focus" as const,
+        entityId: "fox",
+      })),
+    );
+    const script = buildKeepsakeScript({
+      events: [first, second],
+      sequences: sequences(longOpening, threeBeats(second)),
+    })!;
+    expectContiguous(script);
+    expectWholeBeats(script);
+    expect(script.steps.map((step) => step.kind)).toEqual([
+      "intro",
+      "play",
+      "hold",
+    ]);
+    expect(script.steps[1]).toMatchObject({ role: "moment" });
+    // Without the opening the moment keeps its full live holds.
+    expect(script.maxBeatMs).toBeUndefined();
+    expect(script.steps[1].durationMs).toBe(2500 + 50 + 2500 + 4000);
+    expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
+  });
+
   it("holds for the longest script the contract allows", () => {
     // Three beats is the contract's cap; three reveals are the longest beats,
     // and a crowded drawing gives the longest intro.

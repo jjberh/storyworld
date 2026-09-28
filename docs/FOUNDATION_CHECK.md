@@ -41,8 +41,8 @@ published locally. After **Start my story** the URL becomes
 `/join?mode=live&world=your-room&fixture=nova`.
 
 To see creation-failure recovery, run the web app in live mode with
-`VITE_SPACETIMEDB_URI` pointing at a port nothing listens on, check every object,
-and press **Start my story**. After about ten seconds **Try starting my story
+`VITE_SPACETIMEDB_URI` pointing at a port nothing listens on, answer any
+question on the picture, and press **Start my story**. After about ten seconds **Try starting my story
 again** and **Review my picture again** appear; correct the URI and restart web
 to create the world.
 
@@ -68,10 +68,13 @@ hackathon foundation; rooms separate edits, not confidential data.
   preserves the source artwork beneath later strokes, and submits the composite
   image and optional description to `/api/interpret/scene`. Drafts survive
   interpretation failures and retry, but remain in memory for the page session.
-- The child checks one proposed object at a time on the submitted picture and
-  answers **Yes, that's right!**, **Change it** (rename, retype, or redraw its
-  region), or **That is not in my picture**; **I missed something** adds an
-  object. Exactly one character is required. Changing the picture or prompt
+- Objects Gemini is sure of (confidence 0.9 or more) are accepted
+  automatically. Each unsure object gets a quick question on the picture with
+  labelled picture buttons for its role or **Not in my picture**. Tapping any
+  box changes it (role, name, box, or removal); **I missed something** adds an
+  object. With no character the child taps one or draws a box around it.
+  **Start my story** waits for exactly one character and no unanswered
+  question. Changing the picture or prompt
   requires reinterpretation. Retyping an object gives it that role's default
   properties. No fear rule is inferred from a detected obstacle.
   **Start my story** freezes one world ID and request ID and calls

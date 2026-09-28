@@ -16,6 +16,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
+  gap: 3px;
   padding: 5px;
   color: #1f0c33;
   background: transparent;
@@ -29,16 +30,104 @@
   text-overflow: ellipsis;
   cursor: pointer;
 }
+.object-region .role-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.object-region span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.object-region.is-unsure {
+  border-style: dashed;
+}
+.object-region.is-character {
+  border-color: #2a7f62;
+}
 .object-region[aria-pressed="true"] {
   color: #3a1b6b;
   background: rgb(255 249 219 / 18%);
   border-color: #6c30a3;
   box-shadow: 0 0 0 2px #fff9db;
 }
+.object-region:focus-visible,
+.role-choice:focus-visible {
+  outline: 3px solid #ffb000;
+  outline-offset: 1px;
+}
+/* The quick question sits on the picture next to the object it asks about;
+   SceneConfirmation places it with placeQuestion so it stays inside. */
+.picture-question {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: 4px;
+  max-width: calc(100% - 12px);
+  padding: 5px;
+  background: #fffdf5;
+  border: 3px solid #3a1b6b;
+  border-radius: 12px;
+  box-shadow: 0 3px 8px rgb(58 27 107 / 25%);
+}
+.picture-question-title {
+  margin: 0;
+  overflow: hidden;
+  color: #3a1b6b;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.picture-question-choices {
+  display: flex;
+  gap: 3px;
+}
+.role-choice {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 2px;
+  width: 46px;
+  min-height: 48px;
+  padding: 4px 1px;
+  color: #3a1b6b;
+  background: #fff;
+  border: 2px solid #d9cdea;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.1;
+  cursor: pointer;
+}
+.role-choice[aria-pressed="true"] {
+  color: #fff;
+  background: #6c30a3;
+  border-color: #3a1b6b;
+}
+.role-choice-remove {
+  color: #8c442b;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .picture-question {
+    animation: question-pop 160ms ease-out;
+  }
+}
+@keyframes question-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
 .draw-a-circle {
   position: absolute;
   right: 16px;
   bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0;
   padding: 8px 10px;
   color: #fff;
@@ -47,6 +136,8 @@
   border-radius: 8px;
   font-size: 12px;
   font-weight: bold;
+  /* Taps pass through to the boxes and paper underneath. */
+  pointer-events: none;
 }
 
 :root {
@@ -903,14 +994,6 @@ footer {
   font-size: 12px;
   font-weight: 900;
 }
-.picture-check-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
-}
-.picture-check-actions .quiet-action {
-  grid-column: span 2;
-}
 .quiet-action,
 .add-missed {
   justify-self: start;
@@ -961,6 +1044,24 @@ footer {
   font: inherit;
   font-size: 15px;
   font-weight: 900;
+}
+.start-story:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.start-story-hint {
+  color: #6b5885;
+  font-size: 12px;
+  font-weight: 700;
+}
+.picture-check-card .with-icon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.done-changing {
+  justify-self: start;
+  width: auto;
 }
 .authoring-scribble {
   top: -22px;
@@ -1033,12 +1134,8 @@ footer {
   .authoring-sun {
     display: none;
   }
-  .change-object,
-  .picture-check-actions {
+  .change-object {
     grid-template-columns: 1fr;
-  }
-  .picture-check-actions .quiet-action {
-    grid-column: auto;
   }
   .redraw-region {
     grid-column: auto;

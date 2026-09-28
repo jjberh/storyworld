@@ -125,6 +125,19 @@ export type StoryStageOptions = {
    * beats so their captions stay readable; the live stage leaves this at 0.
    */
   minBeatHoldMs?: number;
+  /**
+   * The longest time a beat holds, in milliseconds (never below
+   * `minBeatHoldMs`). A recording caps beats to fit its length budget; the
+   * live stage leaves this unset.
+   */
+  maxBeatHoldMs?: number;
+  /**
+   * Advance the stage clock by the real time between frames, however long.
+   * By default a slow frame advances it at most 100 ms (Pixi's ticker cap) so
+   * a stall never skips animation; a recording turns this on so its beats
+   * keep pace with the video, which runs in real time.
+   */
+  realTimeClock?: boolean;
 };
 
 /** A centred paper card drawn over the stage, e.g. a movie's end card. */
@@ -263,6 +276,8 @@ export class StoryStageRenderer {
   private readonly titleLayer = new Container();
   private readonly canvasCaptions: boolean;
   private readonly minBeatHoldMs: number;
+  private readonly maxBeatHoldMs: number;
+  private readonly realTimeClock: boolean;
   /** What the canvas caption and title card were last drawn as. */
   private drawnCaption: string | undefined;
   private drawnTitle: StageTitleCard | null = null;
@@ -314,6 +329,11 @@ export class StoryStageRenderer {
       options.keepCommittedRevealsVisible ?? false;
     this.canvasCaptions = options.canvasCaptions ?? false;
     this.minBeatHoldMs = Math.max(0, options.minBeatHoldMs ?? 0);
+    this.maxBeatHoldMs = Math.max(
+      this.minBeatHoldMs,
+      options.maxBeatHoldMs ?? Infinity,
+    );
+    this.realTimeClock = options.realTimeClock ?? false;
     this.size = {
       width: options.width ?? STAGE_WIDTH,
       height: options.height ?? STAGE_HEIGHT,
@@ -421,9 +441,9 @@ export class StoryStageRenderer {
       for (const [index, storyBeat] of sequence.beats.entries()) {
         if (aborted()) return;
         const action = storyBeat.action;
-        const hold = Math.max(
-          beatHoldMs(action, this.reducedMotion),
-          this.minBeatHoldMs,
+        const hold = Math.min(
+          Math.max(beatHoldMs(action, this.reducedMotion), this.minBeatHoldMs),
+          this.maxBeatHoldMs,
         );
         // Claim the stage for this beat before any await, so a sequence that
         // arrives while a reveal waits for its frames still lets it finish.
@@ -625,6 +645,8 @@ export class StoryStageRenderer {
     this.resize(this.size.width, this.size.height);
     this.drawBackdrop();
     this.syncViews();
+    // A stall longer than a second still advances the clock by only 1 s.
+    if (this.realTimeClock) this.app.ticker.minFPS = 1;
     this.app.ticker.add((ticker) => this.tick(ticker.deltaMS));
   }
 

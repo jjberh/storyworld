@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sceneInterpretationResponseSchema } from "@storyworld/contracts";
+import {
+  SCENE_AUTO_ACCEPT_CONFIDENCE,
+  sceneInterpretationResponseSchema,
+} from "@storyworld/contracts";
 import { buildApp } from "./app";
 import { createInterpreter } from "./services/interpretation";
 import { fixtureScene } from "./services/scene";
@@ -123,6 +126,18 @@ describe("live scene interpretation", () => {
         candidates: [...valid.candidates, valid.candidates[0]],
       }).success,
     ).toBe(false);
+    // A character candidate always needs the reference; only a scene with no
+    // character may leave it out.
+    const withoutReference = { ...valid, characterCandidateId: undefined };
+    expect(
+      sceneInterpretationResponseSchema.safeParse(withoutReference).success,
+    ).toBe(false);
+    expect(
+      sceneInterpretationResponseSchema.safeParse({
+        ...withoutReference,
+        candidates: valid.candidates.filter(({ role }) => role !== "character"),
+      }).success,
+    ).toBe(true);
   });
 
   it("keeps each object's role, description and properties", async () => {
@@ -425,26 +440,66 @@ describe("live scene interpretation", () => {
         }
       });
 
-    for (const [name, objects] of [
-      ["no objects", []],
-      ["no character", [river, castle]],
-    ] as const)
-      it(name + " asks for a picture with a hero", async () => {
-        const app = liveApp(
-          asFetch(async () => geminiReply({ ...goodScene, objects })),
+    it("no objects asks for a picture with something in it", async () => {
+      const app = liveApp(
+        asFetch(async () => geminiReply({ ...goodScene, objects: [] })),
+      );
+      try {
+        const res = await scene(app, { image: png });
+        expect(res.statusCode).toBe(422);
+        expect(res.json()).toMatchObject({
+          code: "SCENE_NOT_RECOGNIZED",
+          retryable: true,
+        });
+        expect(res.json().candidates).toBeUndefined();
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
+  describe("a picture without a clear character", () => {
+    it("returns its objects so the child can point to the hero", async () => {
+      const app = liveApp(
+        asFetch(async () =>
+          geminiReply({ ...goodScene, objects: [river, castle] }),
+        ),
+      );
+      try {
+        const res = await scene(app, { image: png });
+        expect(res.statusCode).toBe(200);
+        const body = sceneInterpretationResponseSchema.parse(res.json());
+        expect(body.characterCandidateId).toBeUndefined();
+        expect(body.candidates.map(({ role }) => role)).toEqual([
+          "goal",
+          "obstacle",
+        ]);
+        expect(body.goalCandidateId).toBe(body.candidates[0]!.id);
+      } finally {
+        await app.close();
+      }
+    });
+
+    it("tells the model it may leave the character out", async () => {
+      const fetchMock = vi.fn(async () =>
+        geminiReply({ ...goodScene, objects: [castle] }),
+      );
+      const app = liveApp(asFetch(fetchMock));
+      try {
+        await scene(app, { image: png });
+        const [, init] = fetchMock.mock.calls[0] as unknown as [
+          string,
+          RequestInit,
+        ];
+        const instruction = JSON.stringify(
+          JSON.parse(init.body as string).systemInstruction,
         );
-        try {
-          const res = await scene(app, { image: png });
-          expect(res.statusCode).toBe(422);
-          expect(res.json()).toMatchObject({
-            code: "SCENE_NOT_RECOGNIZED",
-            retryable: true,
-          });
-          expect(res.json().candidates).toBeUndefined();
-        } finally {
-          await app.close();
-        }
-      });
+        expect(instruction).toContain("leave the character out");
+        expect(instruction).toContain("below " + SCENE_AUTO_ACCEPT_CONFIDENCE);
+      } finally {
+        await app.close();
+      }
+    });
   });
 
   describe("provider failures are safe and recoverable", () => {
@@ -647,9 +702,16 @@ describe("keyless scene fixture", () => {
         expect(body.moodHints).toEqual(["curious", "worried"]);
         expect(body.candidates.map(({ id }) => id).sort()).toEqual([
           "castle",
+          "cloud",
           "nova",
           "river",
         ]);
+        // Fixture mode must exercise the on-picture question: the scene
+        // confirmation only asks about objects below the threshold.
+        const unsure = body.candidates.filter(
+          ({ confidence }) => confidence < SCENE_AUTO_ACCEPT_CONFIDENCE,
+        );
+        expect(unsure.map(({ id }) => id)).toEqual(["cloud"]);
       } finally {
         await app.close();
       }
