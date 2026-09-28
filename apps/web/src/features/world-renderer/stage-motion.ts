@@ -235,6 +235,40 @@ export function beatPulseDurationMs(type: StoryAction["type"]) {
   return pulseDurations[type] ?? 0;
 }
 
+/** Flourishes that last the whole journey: a flight rises and lands with it. */
+const journeyPulses = new Set<StoryAction["type"]>([
+  "fly_over",
+  "ride",
+  "launch",
+]);
+/** Flourishes that play on arrival: the wobble or dip at the obstacle. */
+const arrivalPulses = new Set<StoryAction["type"]>(["blocked_by", "splash"]);
+
+/** Whether a beat's flourish waits until its piece has arrived. */
+export function pulsesOnArrival(type: StoryAction["type"]) {
+  return arrivalPulses.has(type);
+}
+
+/**
+ * How far into its flourish a beat is, `elapsedMs` after it started, when the
+ * beat also carries its piece for `travelMs`: a flight, ride or launch
+ * stretches its flourish across the journey, a blocked wobble or a splash
+ * waits until the piece arrives (negative until then, which rests), and every
+ * other flourish plays from the start. Without travel it is `elapsedMs`.
+ */
+export function beatPulseElapsedMs(
+  type: StoryAction["type"],
+  elapsedMs: number,
+  travelMs: number,
+) {
+  const duration = beatPulseDurationMs(type);
+  if (travelMs <= 0 || !duration) return elapsedMs;
+  if (journeyPulses.has(type))
+    return (elapsedMs * duration) / Math.max(duration, travelMs);
+  if (arrivalPulses.has(type)) return elapsedMs - travelMs;
+  return elapsedMs;
+}
+
 /**
  * The one-shot flourish the active piece plays when a beat starts: a focus
  * glow, a reveal pop, a blocked wobble, a celebration jump, a flyover lift, a
@@ -423,22 +457,23 @@ export function combinePoses(...poses: Pose[]): Pose {
   );
 }
 
-export const MOVE_TWEEN_MS = 600;
-
-/** Paper-slide easing: quick start, soft landing. */
-export function easeOutCubic(t: number) {
+/** Walking easing: a gentle start, a steady stride and a soft landing. */
+function easeInOutSine(t: number) {
   const clamped = Math.min(1, Math.max(0, t));
-  return 1 - (1 - clamped) ** 3;
+  return (1 - Math.cos(Math.PI * clamped)) / 2;
 }
 
-/** The displayed offset `elapsedMs` into a move from `from` to `to`. */
+/**
+ * The displayed offset `elapsedMs` into a move from `from` to `to` that takes
+ * `durationMs` (see `beatTravelMs`), so a piece walks the whole way.
+ */
 export function tweenOffset(
   from: Offset,
   to: Offset,
   elapsedMs: number,
-  durationMs = MOVE_TWEEN_MS,
+  durationMs: number,
 ): Offset {
-  const t = durationMs <= 0 ? 1 : easeOutCubic(elapsedMs / durationMs);
+  const t = durationMs <= 0 ? 1 : easeInOutSine(elapsedMs / durationMs);
   return {
     x: from.x + (to.x - from.x) * t,
     y: from.y + (to.y - from.y) * t,

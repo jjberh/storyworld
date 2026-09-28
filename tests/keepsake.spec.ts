@@ -1,6 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
-import { drawOnStory, mockEdit, mockJev, waitForReveal } from "./story-mocks";
+import {
+  drawOnStory,
+  mockEdit,
+  mockJev,
+  MOMENT_TIMEOUT,
+  traceStage,
+  waitForReveal,
+} from "./story-mocks";
 
 const response = {
   mode: "live",
@@ -55,41 +62,6 @@ async function startRoom(page: Page) {
     page.getByRole("heading", { name: "Your Story Room" }),
   ).toBeVisible();
   await waitForReveal(page);
-}
-
-type StageTrace = { captions: string[]; actions: string[] };
-
-/**
- * Records every caption and action the live stage shows from now on, so a
- * beat that is on stage for under a second cannot slip past an assertion.
- */
-async function traceStage(page: Page) {
-  await page.evaluate(() => {
-    const trace: StageTrace = { captions: [], actions: [] };
-    (window as unknown as { stageTrace: StageTrace }).stageTrace = trace;
-    const note = () => {
-      const caption =
-        document.querySelector(".paper-theater-caption")?.textContent ?? "";
-      if (caption !== trace.captions.at(-1)) trace.captions.push(caption);
-      const action =
-        document
-          .querySelector(".paper-theater-stage")
-          ?.getAttribute("data-action") ?? "";
-      if (action !== trace.actions.at(-1)) trace.actions.push(action);
-    };
-    new MutationObserver(note).observe(document.body, {
-      subtree: true,
-      childList: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: ["data-action"],
-    });
-    note();
-  });
-  return () =>
-    page.evaluate(
-      () => (window as unknown as { stageTrace: StageTrace }).stageTrace,
-    );
 }
 
 /** Loads a recorded movie into a <video> and reports duration and frames. */
@@ -190,9 +162,11 @@ test("Save my movie records a playable keepsake without disturbing the stage", a
   await expect(page.locator(".drawing-note")).toHaveText(
     "The bridge holds. Fox has a way through.",
   );
-  await expect(fox).toHaveAttribute("data-placement", "target-side");
-  // The success moment played, however briefly its caption was on stage.
-  await expect.poll(stageTrace).toMatchObject({
+  await expect(fox).toHaveAttribute("data-placement", "target-side", {
+    timeout: MOMENT_TIMEOUT,
+  });
+  // The success moment played.
+  await expect.poll(stageTrace, { timeout: MOMENT_TIMEOUT }).toMatchObject({
     captions: expect.arrayContaining([
       expect.stringContaining("Fox made it across!"),
     ]),
@@ -201,6 +175,7 @@ test("Save my movie records a playable keepsake without disturbing the stage", a
   await expect(page.locator(".paper-theater-stage")).toHaveAttribute(
     "data-action",
     "resting",
+    { timeout: MOMENT_TIMEOUT },
   );
   const revision = await page.getByText(/^Revision \d+$/).textContent();
   const caption = await page.locator(".paper-theater-caption").textContent();

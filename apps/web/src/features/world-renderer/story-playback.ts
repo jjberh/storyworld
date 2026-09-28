@@ -4,6 +4,7 @@ import type {
   StorySequence,
 } from "@storyworld/contracts/story-beat";
 import { blockingObstacle } from "@storyworld/contracts/entity-traits";
+import { beatPulseDurationMs, pulsesOnArrival } from "./stage-motion";
 
 // Pure beat-playback rules for the Story Room stage. The renderer owns timing
 // and visuals; these functions only decide where pieces go and how long a beat
@@ -14,12 +15,35 @@ export type Placement =
   "source" | "near-obstacle" | "beyond-obstacle" | "on-carrier" | "target-side";
 export type Movement = { offset: Offset; placement: Placement };
 
-/** How long a beat holds before the next one starts, in milliseconds. */
-export const BEAT_HOLD_MS = 650;
-export const REDUCED_MOTION_BEAT_HOLD_MS = 40;
-export const CELEBRATE_EXTRA_MS = 280;
-/** Extra hold for beats that carry a piece across the stage. */
-export const TRAVEL_EXTRA_MS = 250;
+/**
+ * How long each beat holds the stage before the next one starts, in
+ * milliseconds. The product plan times a story moment at "1 to 3 beats × 2 to
+ * 4 s: notice, act, react", about 5 to 10 s per event, slow enough for ages 3
+ * to 6 to follow. Every hold stays inside that range: a small beat like
+ * `focus` is shortest, a beat that carries a piece across the stage leaves
+ * room to see it travel, and a celebration holds longest.
+ */
+export const BEAT_HOLD_MS: Readonly<Record<StoryAction["type"], number>> = {
+  focus: 2000,
+  react: 2200,
+  reveal: 2500,
+  blocked_by: 2500,
+  weather_shift: 2500,
+  splash: 2800,
+  move_toward: 3000,
+  ride: 3000,
+  launch: 3000,
+  fly_over: 3200,
+  celebrate: 3500,
+};
+/** The plan's range for one beat, which every hold above stays within. */
+export const MIN_BEAT_HOLD_MS = 2000;
+export const MAX_BEAT_HOLD_MS = 4000;
+/**
+ * The share of a beat's hold a moving piece spends travelling; it lands with
+ * the rest of the beat to spare, so the caption finishes over a still stage.
+ */
+const TRAVEL_SHARE = 0.75;
 
 export function center(bounds: Bounds) {
   return {
@@ -188,18 +212,34 @@ export function beatMovement(
   }
 }
 
-const holdExtras: Partial<Record<StoryAction["type"], number>> = {
-  celebrate: CELEBRATE_EXTRA_MS,
-  fly_over: TRAVEL_EXTRA_MS,
-  ride: TRAVEL_EXTRA_MS,
-  launch: TRAVEL_EXTRA_MS,
-  splash: TRAVEL_EXTRA_MS,
-};
+/**
+ * How long a beat holds the stage before the next beat. Reduced motion keeps
+ * the same holds, so captions stay on screen just as long; only movement
+ * stops.
+ */
+export function beatHoldMs(action: StoryAction) {
+  return BEAT_HOLD_MS[action.type];
+}
 
-/** How long a beat holds the stage before the next beat. */
-export function beatHoldMs(action: StoryAction, reducedMotion: boolean) {
-  if (reducedMotion) return REDUCED_MOTION_BEAT_HOLD_MS;
-  return BEAT_HOLD_MS + (holdExtras[action.type] ?? 0);
+/**
+ * How long the piece a beat of `type` moves takes to travel, for a beat that
+ * holds `holdMs` (a recording may hold it shorter than live). Paced across
+ * most of the beat so the character visibly walks or crosses, instead of
+ * snapping there and waiting; a splash or blocked wobble, which plays once the
+ * piece arrives, always keeps room to finish. Under reduced motion pieces move
+ * instantly.
+ */
+export function beatTravelMs(
+  type: StoryAction["type"],
+  holdMs: number,
+  reducedMotion: boolean,
+) {
+  if (reducedMotion) return 0;
+  const hold = Math.max(0, holdMs);
+  const travel = Math.round(hold * TRAVEL_SHARE);
+  return pulsesOnArrival(type)
+    ? Math.max(0, Math.min(travel, hold - beatPulseDurationMs(type)))
+    : travel;
 }
 
 /**

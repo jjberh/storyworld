@@ -3,6 +3,49 @@ import { expect, type Page } from "@playwright/test";
 type Entity = { id: string; properties: string[] };
 
 /**
+ * How long to wait for a story moment to reach the stage. Beats hold 2 to 4 s,
+ * a newer moment waits for the beat on stage to finish, and the line waited
+ * for may be its second or third beat, so this allows for several beats.
+ */
+export const MOMENT_TIMEOUT = 15_000;
+
+export type StageTrace = { captions: string[]; actions: string[] };
+
+/**
+ * Records every caption and action the live stage shows from now on, so an
+ * assertion sees every beat, however briefly it was on stage, and can wait
+ * for a moment to finish instead of sleeping.
+ */
+export async function traceStage(page: Page) {
+  await page.evaluate(() => {
+    const trace: StageTrace = { captions: [], actions: [] };
+    (window as unknown as { stageTrace: StageTrace }).stageTrace = trace;
+    const note = () => {
+      const caption =
+        document.querySelector(".paper-theater-caption")?.textContent ?? "";
+      if (caption !== trace.captions.at(-1)) trace.captions.push(caption);
+      const action =
+        document
+          .querySelector(".paper-theater-stage")
+          ?.getAttribute("data-action") ?? "";
+      if (action !== trace.actions.at(-1)) trace.actions.push(action);
+    };
+    new MutationObserver(note).observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["data-action"],
+    });
+    note();
+  });
+  return () =>
+    page.evaluate(
+      () => (window as unknown as { stageTrace: StageTrace }).stageTrace,
+    );
+}
+
+/**
  * Waits for the Story Room's lift-off reveal (about 3 to 4 s after "Start my
  * story") to finish, so the pieces have landed and the opening sequence may
  * play.

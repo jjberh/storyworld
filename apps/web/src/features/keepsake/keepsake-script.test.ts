@@ -1,18 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
   Entity,
   WorldEvent,
   WorldState,
 } from "@storyworld/contracts/model";
-import type {
-  StoryAction,
-  StorySequence,
+import {
+  storyActionSchema,
+  type StoryAction,
+  type StorySequence,
 } from "@storyworld/contracts/story-beat";
 import {
   introDurationMs,
   KEEPSAKE_INTRO,
 } from "../world-renderer/intro-motion";
-import { beatHoldMs } from "../world-renderer/story-playback";
+import { BEAT_HOLD_MS } from "../world-renderer/story-playback";
 import {
   buildKeepsakeScript,
   END_CARD_MS,
@@ -29,26 +30,6 @@ import {
   sequenceDurationMs,
   type KeepsakeScript,
 } from "./keepsake-script";
-
-// The real beat holds, unless a test stands in longer ones.
-vi.mock("../world-renderer/story-playback", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../world-renderer/story-playback")>();
-  return { ...actual, beatHoldMs: vi.fn(actual.beatHoldMs) };
-});
-const { beatHoldMs: liveBeatHoldMs } = await vi.importActual<
-  typeof import("../world-renderer/story-playback")
->("../world-renderer/story-playback");
-afterEach(() => {
-  vi.mocked(beatHoldMs).mockImplementation(liveBeatHoldMs);
-});
-
-/** Live beats that hold 2–4 s, as a later change will make them. */
-function growHolds() {
-  vi.mocked(beatHoldMs).mockImplementation((action, reducedMotion) =>
-    reducedMotion ? 40 : action.type === "celebrate" ? 4000 : 2500,
-  );
-}
 
 const fox: Entity = {
   id: "fox",
@@ -273,14 +254,19 @@ describe("buildKeepsakeScript", () => {
     });
   });
 
-  it("gives every beat its full hold: play steps are never cut", () => {
+  it("plays every beat whole at the budget's cap: play steps are never cut", () => {
     const script = buildKeepsakeScript({
       events: [opening, withBridge],
       sequences: sequences(openingSequence, bridgeSequence),
     })!;
+    // Two 3-beat sequences at the live 2–4 s holds need the budget's cap.
+    expect(script.maxBeatMs).toBeGreaterThanOrEqual(KEEPSAKE_BEAT_MS);
+    expect(script.maxBeatMs).toBeLessThan(BEAT_HOLD_MS.celebrate);
     for (const step of script.steps)
       if (step.kind === "play") {
-        expect(step.durationMs).toBe(sequenceDurationMs(step.sequence));
+        expect(step.durationMs).toBe(
+          sequenceDurationMs(step.sequence, false, script.maxBeatMs),
+        );
         expect(step.durationMs).toBeGreaterThanOrEqual(
           step.sequence.beats.length * KEEPSAKE_BEAT_MS,
         );
@@ -288,9 +274,31 @@ describe("buildKeepsakeScript", () => {
   });
 
   it("is reveal plus idle when there is no story moment yet", () => {
-    const script = buildKeepsakeScript({
+    // A long opening already fills the 10 s, so no idle hold is needed.
+    const full = buildKeepsakeScript({
       events: [opening],
       sequences: sequences(openingSequence),
+    })!;
+    expectContiguous(full);
+    expect(full.maxBeatMs).toBeUndefined();
+    expect(full.totalMs).toBe(
+      introDurationMs(3, KEEPSAKE_INTRO) +
+        sequenceDurationMs(openingSequence) +
+        END_CARD_MS,
+    );
+    expect(full.totalMs).toBeGreaterThanOrEqual(MIN_MOVIE_MS);
+    expect(full.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
+    expect(full.steps.map((step) => step.kind)).toEqual([
+      "intro",
+      "play",
+      "hold",
+    ]);
+
+    const script = buildKeepsakeScript({
+      events: [opening],
+      sequences: sequences(
+        sequence(opening, [{ type: "focus", entityId: "fox" }]),
+      ),
     })!;
     expectContiguous(script);
     expect(script.momentEventId).toBeUndefined();
@@ -372,19 +380,18 @@ describe("fitBeats", () => {
   ]);
 
   it("leaves holds alone when they fit", () => {
-    growHolds();
     expect(fitBeats([long], 6500)).toEqual({ maxBeatMs: undefined });
+    expect(sequenceDurationMs(long)).toBe(
+      BEAT_HOLD_MS.celebrate + BEAT_HOLD_MS.focus,
+    );
   });
 
   it("shortens the longest holds first, never below the keepsake hold", () => {
-    growHolds();
-    // 4000 + 2500 does not fit 5000; a 2500 cap gives 5000.
+    // 3500 + 2000 does not fit 5000; capping the celebration at 3000 does.
     const fit = fitBeats([long], 5000)!;
-    expect(fit.maxBeatMs).toBe(2500);
+    expect(fit.maxBeatMs).toBe(5000 - BEAT_HOLD_MS.focus);
     expect(sequenceDurationMs(long, false, fit.maxBeatMs)).toBe(5000);
-    expect(keepsakeBeatMs(long.beats[1].action, false, 100)).toBe(
-      KEEPSAKE_BEAT_MS,
-    );
+    expect(keepsakeBeatMs(long.beats[1].action, 100)).toBe(KEEPSAKE_BEAT_MS);
     expect(fitBeats([long], 2 * KEEPSAKE_BEAT_MS)).toEqual({
       maxBeatMs: KEEPSAKE_BEAT_MS,
     });
@@ -407,7 +414,10 @@ describe("openingAfterIntro", () => {
       { ...revealing.beats[0], action: { type: "focus", entityId: "castle" } },
       revealing.beats[1],
     ]);
-    expect(step?.durationMs).toBe(2 * KEEPSAKE_BEAT_MS);
+    // Two plain beats: no reveal hold and no frames waiting for a reveal.
+    expect(step?.durationMs).toBe(
+      BEAT_HOLD_MS.focus + BEAT_HOLD_MS.move_toward,
+    );
     // The room's own history is left alone.
     expect(revealing.beats[0].action.type).toBe("reveal");
     expect(openingAfterIntro(revealing).sourceEventId).toBe(opening.id);
@@ -437,17 +447,7 @@ describe("the 15 second ceiling", () => {
         );
   }
 
-  it("keeps today's beat holds: the longest script already fits", () => {
-    const script = buildKeepsakeScript({
-      events: [first, second],
-      sequences: sequences(threeBeats(first), threeBeats(second)),
-    })!;
-    expect(script.maxBeatMs).toBeUndefined();
-    expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
-  });
-
-  it("shortens long live holds to fit a crowded drawing, a 3-beat opening and a 3-beat moment", () => {
-    growHolds();
+  it("shortens the live holds to fit a crowded drawing, a 3-beat opening and a 3-beat moment", () => {
     const script = buildKeepsakeScript({
       events: [first, second],
       sequences: sequences(threeBeats(first), threeBeats(second)),
@@ -462,14 +462,13 @@ describe("the 15 second ceiling", () => {
       "hold",
     ]);
     expect(script.maxBeatMs).toBeGreaterThanOrEqual(KEEPSAKE_BEAT_MS);
-    expect(script.maxBeatMs).toBeLessThan(2500);
+    expect(script.maxBeatMs).toBeLessThan(BEAT_HOLD_MS.reveal);
     expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
     expect(script.totalMs).toBeGreaterThanOrEqual(MIN_MOVIE_MS);
     expect(script.steps.at(-1)).toMatchObject({ durationMs: END_CARD_MS });
   });
 
-  it("keeps long live holds when a small drawing leaves room", () => {
-    growHolds();
+  it("keeps the live holds when a small drawing leaves room", () => {
     const small = event(0, [fox, river, castle]);
     const next = event(1, [fox, river, castle, bridge]);
     const script = buildKeepsakeScript({
@@ -483,11 +482,10 @@ describe("the 15 second ceiling", () => {
     const moment = script.steps.find(
       (step) => step.kind === "play" && step.role === "moment",
     );
-    expect(moment?.durationMs).toBe(4000);
+    expect(moment?.durationMs).toBe(BEAT_HOLD_MS.celebrate);
   });
 
   it("drops the opening when even the shortest holds overrun", () => {
-    growHolds();
     // Longer than the contract allows, to force the fallback.
     const longOpening = sequence(
       first,
@@ -510,8 +508,82 @@ describe("the 15 second ceiling", () => {
     expect(script.steps[1]).toMatchObject({ role: "moment" });
     // Without the opening the moment keeps its full live holds.
     expect(script.maxBeatMs).toBeUndefined();
-    expect(script.steps[1].durationMs).toBe(2500 + 50 + 2500 + 4000);
+    expect(script.steps[1].durationMs).toBe(
+      BEAT_HOLD_MS.reveal +
+        50 +
+        BEAT_HOLD_MS.move_toward +
+        BEAT_HOLD_MS.celebrate,
+    );
     expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
+  });
+
+  it("fits three of any beat in both sequences, at any drawing size", () => {
+    const types = storyActionSchema.options.map(
+      (option) => option.shape.type.value,
+    );
+    const actionOf = (type: StoryAction["type"]): StoryAction => {
+      switch (type) {
+        case "move_toward":
+          return { type, entityId: "fox", targetId: "castle" };
+        case "blocked_by":
+        case "fly_over":
+        case "splash":
+          return { type, entityId: "fox", obstacleId: "river" };
+        case "ride":
+          return { type, entityId: "fox", carrierId: "bridge" };
+        case "launch":
+          return { type, entityId: "fox", launcherId: "bridge" };
+        case "react":
+          return {
+            type,
+            entityId: "fox",
+            causeId: "bridge",
+            reaction: "happy",
+          };
+        case "weather_shift":
+          return { type, weather: "rain" };
+        default:
+          return { type, entityId: "fox" };
+      }
+    };
+    for (const pieces of [1, 3, 20, 200])
+      for (const type of types)
+        for (const reducedMotion of [false, true]) {
+          const crowd = Array.from({ length: pieces - 1 }, (_, index) => ({
+            ...castle,
+            id: `piece-${index}`,
+          }));
+          const start = event(0, [fox, ...crowd]);
+          const moment = event(1, [fox, ...crowd, bridge]);
+          const three = (item: WorldEvent) =>
+            sequence(item, [actionOf(type), actionOf(type), actionOf(type)]);
+          const script = buildKeepsakeScript({
+            events: [start, moment],
+            sequences: sequences(three(start), three(moment)),
+            reducedMotion,
+          })!;
+          expectContiguous(script);
+          // Both sequences play whole (a focus-only one scores nothing, so
+          // it is never the moment), and the end card closes the movie.
+          expect(
+            script.steps.filter((step) => step.kind === "play"),
+          ).toHaveLength(type === "focus" ? 1 : 2);
+          expect(script.steps.at(-1)).toMatchObject({
+            durationMs: END_CARD_MS,
+            titleCard: { title: "Fox's story" },
+          });
+          for (const step of script.steps)
+            if (step.kind === "play")
+              expect(step.durationMs).toBe(
+                sequenceDurationMs(
+                  step.sequence,
+                  reducedMotion,
+                  script.maxBeatMs,
+                ),
+              );
+          expect(script.totalMs).toBeGreaterThanOrEqual(MIN_MOVIE_MS);
+          expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
+        }
   });
 
   it("holds for the longest script the contract allows", () => {
