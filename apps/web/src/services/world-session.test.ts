@@ -4,6 +4,8 @@ import {
   holdWorldClient,
   peekWorldClient,
   releaseWorldClient,
+  markRoomRevealed,
+  roomOwesReveal,
   worldRoomHref,
 } from "./world-session";
 
@@ -39,6 +41,35 @@ describe("world session", () => {
     releaseWorldClient("story-1");
     expect(client.dispose).toHaveBeenCalledOnce();
     expect(peekWorldClient("story-1")).toBeUndefined();
+  });
+
+  it("owes the room its lift-off reveal until a stage starts it", () => {
+    const client = fakeClient();
+    holdWorldClient("story-1", client, { reveal: true });
+    expect(roomOwesReveal("story-2")).toBe(false);
+    // Reading is pure: a render that runs twice sees the same answer.
+    expect(roomOwesReveal("story-1")).toBe(true);
+    expect(roomOwesReveal("story-1")).toBe(true);
+    markRoomRevealed("story-2");
+    expect(roomOwesReveal("story-1")).toBe(true);
+    markRoomRevealed("story-1");
+    // Started: opening the room again on this page skips the reveal.
+    expect(roomOwesReveal("story-1")).toBe(false);
+    markRoomRevealed("story-1");
+    expect(roomOwesReveal("story-1")).toBe(false);
+    expect(peekWorldClient("story-1")).toBe(client);
+  });
+
+  it("owes no reveal unless Start my story asked for one", () => {
+    // A room opened without a held client (a reload, a guest link, another
+    // tab) is owed nothing.
+    expect(roomOwesReveal("story-1")).toBe(false);
+    holdWorldClient("story-1", fakeClient());
+    expect(roomOwesReveal("story-1")).toBe(false);
+    // Releasing the client drops a reveal that never started.
+    holdWorldClient("story-2", fakeClient(), { reveal: true });
+    releaseWorldClient("story-2");
+    expect(roomOwesReveal("story-2")).toBe(false);
   });
 
   it("builds a shareable room URL and leaves /join", () => {

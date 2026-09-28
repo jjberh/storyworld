@@ -8,7 +8,10 @@ import type {
   StoryAction,
   StorySequence,
 } from "@storyworld/contracts/story-beat";
-import { introDurationMs } from "../world-renderer/intro-motion";
+import {
+  introDurationMs,
+  KEEPSAKE_INTRO,
+} from "../world-renderer/intro-motion";
 import { beatHoldMs } from "../world-renderer/story-playback";
 import {
   buildKeepsakeScript,
@@ -253,7 +256,7 @@ describe("buildKeepsakeScript", () => {
       kind: "intro",
       world: opening.state,
       caption: "Fox explores.",
-      durationMs: introDurationMs(3),
+      durationMs: introDurationMs(3, KEEPSAKE_INTRO),
     });
     expect(first).toMatchObject({ role: "opening", sequence: openingSequence });
     // The moment starts from the world before it, then shows its own world.

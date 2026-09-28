@@ -6,6 +6,8 @@ let held:
   | {
       id: string;
       client: WorldClient;
+      /** The room still owes this page its lift-off reveal. */
+      reveal: boolean;
     }
   | undefined;
 
@@ -13,10 +15,34 @@ let held:
  * Keeps the in-memory world client after confirmation so the room can reuse
  * it. This is not a second store of world state; SpacetimeDB (or the fixture
  * client) remains the authority.
+ *
+ * `reveal` hands the room a one-shot "play the lift-off reveal" flag: set
+ * only by "Start my story" and kept in memory (never persisted). The room
+ * reads it with `roomOwesReveal` (a pure read, safe to repeat while
+ * rendering) and clears it with `markRoomRevealed` once its stage has started
+ * the reveal. A reload, a guest link or another tab opens the room with a
+ * fresh client and no flag, so the pieces are already standing.
  */
-export function holdWorldClient(id: string, client: WorldClient) {
+export function holdWorldClient(
+  id: string,
+  client: WorldClient,
+  options: { reveal?: boolean } = {},
+) {
   if (held && held.client !== client) held.client.dispose();
-  held = { id, client };
+  held = { id, client, reveal: options.reveal ?? false };
+}
+
+/**
+ * Whether the room for `id` still owes its lift-off reveal (see
+ * `holdWorldClient`). Reading it changes nothing.
+ */
+export function roomOwesReveal(id: string) {
+  return held?.id === id && held.reveal;
+}
+
+/** The reveal has started on a stage: no later room or stage replays it. */
+export function markRoomRevealed(id: string) {
+  if (held?.id === id) held.reveal = false;
 }
 
 export function peekWorldClient(id: string) {
