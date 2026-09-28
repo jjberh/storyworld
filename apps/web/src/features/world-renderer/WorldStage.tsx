@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Application, Graphics, Text } from "pixi.js";
 import type { WorldEvent, WorldState } from "@storyworld/contracts/model";
-import { isSpanner } from "@storyworld/contracts/entity-traits";
 import { entityLook } from "./entity-look";
 export function WorldStage({
   world,
@@ -150,8 +149,11 @@ export function WorldStage({
               reveal < 1 ? "A way through!" : "Nova can reach the castle";
             cue.style.fill = "#315445";
             cue.position.set(510, 250);
-          } else if (w.entities.some(isSpanner)) {
-            cue.text = "Almost — reach both riverbanks";
+          } else if (
+            w.interaction &&
+            ["almost", "splash", "blocked"].includes(w.interaction.outcome)
+          ) {
+            cue.text = "So close — try another idea";
             cue.style.fill = "#a44d3f";
             cue.position.set(480, 250);
           } else {

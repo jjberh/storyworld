@@ -6,12 +6,12 @@ The foundation demo is deterministic:
 
 ```text
 Nova wants to reach the castle, but the river blocks her.
-Add a bridge -> the route opens.
-Add a storm cloud -> the world becomes rainy.
+Draw a bridge -> it joins the world; Jev decides what happens (a crossing opens the route, a funny miss keeps it blocked).
+Draw a storm cloud -> the world becomes rainy.
 Reset or rewind -> the semantic world returns to an earlier revision.
 ```
 
-Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` does the same for an uploaded picture, and `POST /api/story/sequence` directs one committed event into one to three validated presentation beats. The ElevenLabs routes still return `501` until those integrations are implemented.
+Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` does the same for an uploaded picture, and `POST /api/story/sequence` directs one committed event into one to three validated presentation beats. `POST /api/interactions` asks Jev what happens when a new drawing enters the world; it has no fixture: without `JEV_STORYWORLD_KEY` it answers `PROVIDER_NOT_CONFIGURED` and drawings are still added, just without an outcome. The ElevenLabs routes still return `501` until those integrations are implemented.
 
 ## Shared integration contracts
 
@@ -31,7 +31,7 @@ After **Bring my world to life**, the child checks the proposed objects one at a
 
 **I missed something** lets the child draw a box around anything Gemini overlooked and then name it; it starts as part of the scene. Retyping an object gives it that role's default properties, so "Something in the way" blocks and "A helper" can carry the character across. Every object must be checked before **Start my story** appears, and exactly one character is required. There is no separate destination picker and the opening narration is not editable here: the destination is Gemini's proposed goal while it is still a place to reach (otherwise the first object the child marked as one), and the narration is Gemini's. Fixture (sample) detections are labelled and need the child's consent (**Use this practice reading**) before they can start a local test story.
 
-No relationship is inferred from a detected obstacle. Seeing a river does not mean the character fears it, so the confirmed scene carries no `afraid_of` rule unless an explicit, validated `fearedObstacleId` is supplied (the contract and reducer still accept one, and it must name something that `blocks`). The geometric simulation still treats anything that `blocks` between the character and the destination as in the way unless a helper that `carries` spans it, independently of any rule.
+No relationship is inferred from a detected obstacle. Seeing a river does not mean the character fears it, so the confirmed scene carries no `afraid_of` rule unless an explicit, validated `fearedObstacleId` is supplied (the contract and reducer still accept one, and it must name something that `blocks`). The simulation treats anything that `blocks` between the character and the destination as in the way until a committed interaction outcome gets the character past it, independently of any rule.
 
 Changing the picture or prompt invalidates the interpretation until it is submitted again. **Start my story** freezes the accepted submission, including one world ID and one request ID, and advances only when the committed world is observed. The `initializeScene` reducer validates the complete `ConfirmedScene`, builds typed operations against an empty world, and atomically stores the entities, rules, goal, initial event and `storyDocument` row. Identical owner/request/payload retries return the existing result; conflicting payloads or other owners are rejected.
 
@@ -41,7 +41,9 @@ Fixture interpretation can only create a local test world. With live interpretat
 
 After the committed world is observed, the browser holds that world client for the page session and the URL becomes `/?mode=fixture&world=<id>` or `/?mode=live&world=<id>`. That address is the room. Story Room lists the people currently in that world from the shared `participant` rows. A guest opens `/join?mode=live&world=<id>` and subscribes to the same document, revision, events, and people in the room. Fixture `/join` cannot see another tab's in-memory world; use live mode to share.
 
-The shareable room turns the confirmed picture into a responsive paper theater drawn on one Pixi canvas. Confirmed object bounds become light-edged paper cutouts over a subdued copy of the drawing, each with a small idle loop; later additions use procedural paper tokens chosen from their role and properties. Each piece's idle loop also comes from its properties: characters hop (or glide if they fly), flyers glide with a flap, swimmers and floaters sway, launchers squash and spring, movers roll, weather drifts, blockers shimmer, and everything else breathes. The committed world renders immediately, then Story Room asks the bounded story director to present only the newest committed event. It accepts a sequence only while its request, event, and revision are still current and the sequence validates against that world. On an API or provider failure it says that the moment will play locally and uses the deterministic committed-event sequence. Pending proposals and unrelated presence updates neither request nor restart playback, and reduced-motion users receive the same narrated semantic states without wobble or confetti.
+The shareable room turns the confirmed picture into a responsive paper theater drawn on one Pixi canvas. Confirmed object bounds become light-edged paper cutouts over a subdued copy of the drawing, each with a small idle loop; pieces drawn later are cut from the child's own strokes (stored on the entity as `sketch`), and anything without a drawing uses a procedural paper token chosen from its role and properties. Each piece's idle loop also comes from its properties: characters hop (or glide if they fly), flyers glide with a flap, swimmers and floaters sway, launchers squash and spring, movers roll, weather drifts, blockers shimmer, and everything else breathes. The committed world renders immediately, then Story Room asks the bounded story director to present only the newest committed event. It accepts a sequence only while its request, event, and revision are still current and the sequence validates against that world. On an API or provider failure it says that the moment will play locally and uses the deterministic committed-event sequence. Pending proposals and unrelated presence updates neither request nor restart playback, and reduced-motion users receive the same narrated semantic states without wobble or confetti.
+
+**Draw something new** puts a drawing layer over the stage. Each finished stroke lifts off at once as a wobbling paper cutout (local only, not world state); strokes drawn within about a second of each other, or before **Done drawing**, form one drawing. The drawing is read by `/api/interpret/edit` (Gemini sees the new lines over a faded copy of the picture; keyless, the fixture), the top candidate is committed as `CREATE_ENTITY` with the child's strokes as its `sketch` (a guest proposes it instead, and Jev is asked when the director accepts; guests can never propose an outcome), and then `/api/interactions` decides the outcome, which is committed as `RESOLVE_INTERACTION`. The story director narrates each committed event; a new moment waits for the beat on stage to finish, and stale sequences are dropped. If Jev is not configured or fails, a kind status says so and the drawing stays in the world; after a failure a small **Try again** asks Jev once more for that drawing.
 
 Tapping a piece plays a short local reaction (giggle, jump, spin or wave) with a brief cooldown; it never touches the world, and reduced-motion users get a soft highlight instead. **Save my movie** replays the reveal and the best story moment into a hidden second renderer and records it in the browser with `MediaRecorder` (WebM, or MP4 where only that is supported), then downloads it or opens the share sheet on phones.
 
@@ -53,7 +55,7 @@ The Nova fixture can still draw directly on the page or upload a PNG, JPEG, or W
 
 Multiple candidates or confidence below 0.8 prompt a friendly choice before any world change. A failed interpretation preserves the strokes and uploaded reference; **Try my drawing again** reuses the captured image and bounds with your current narration. Drawing references are held in memory for the current page, not saved across reloads. Microphone input and event audio/captions remain pending provider integration. Text narration works now without audio.
 
-Verify the recovery path by returning a 504 from `/api/interpret/edit`, drawing a bridge, editing the narration, and retrying. The route must remain blocked until an interpretation is accepted and its operation commits. Browser coverage in `tests/drawing-flow.spec.ts` exercises timeout recovery, ambiguous results, uploads, and guest proposals.
+Verify the recovery path by returning a 504 from `/api/interpret/edit`, drawing a bridge, editing the narration, and retrying. The route must remain blocked until an interpretation is accepted, its operation commits, and Jev's outcome for it is committed. There are no sample-object buttons; drawing is the only way to add something. Browser coverage in `tests/drawing-flow.spec.ts` exercises timeout recovery, ambiguous results, uploads, and guest proposals.
 
 Dismiss an uncertain preview with **Keep drawing** to revise your words and retry the same image. Reset and rewind discard the draft and its retry image; results from interpretations started before the restore are ignored.
 
@@ -61,12 +63,20 @@ Provider work proposes a `SceneInterpretationResponse`: image-space object candi
 
 ### Entities: roles and properties
 
-Every entity has a `role` the engine needs, a friendly `name`, a short `description`, and up to six `properties` from a closed list (`SCHEMA_VERSION` 2):
+Every entity has a `role` the engine needs, a friendly `name`, a short `description`, up to six `properties` from a closed list, and, when it was drawn mid-story, an optional `sketch` of the child's strokes (`SCHEMA_VERSION` 3):
 
 - Roles: `character` (the one hero), `goal` (a place to reach), `obstacle`, `helper`, `scenery`.
 - Properties: `moves`, `flies`, `swims`, `floats`, `carries`, `launches`, `blocks`, `burns`, `scares`, `shelters`, `weather`, `goal`.
 
-The world rules read properties through `@storyworld/contracts/entity-traits`: anything that `blocks` between the character and the goal blocks the route unless a `helper` that `carries` spans it, and anything with `weather` brings rain. `description` is model-written text: it is shown to the story director only as untrusted guidance and never decides structure. The Nova fixture maps to Nova (`character`, `moves`), River (`obstacle`, `blocks`), Castle (`goal`, `goal`), the sample bridge (`helper`, `carries`) and the storm cloud (`scenery`, `weather`).
+The world rules read properties through `@storyworld/contracts/entity-traits`: anything that `blocks` between the character and the goal blocks the route until a committed interaction outcome crosses it (the world's `crossings`), and anything with `weather` brings rain. A drawing's geometry alone never opens a route, nothing that still blocks the route can be removed (rewind and reset remain), and the drawing being judged is never its own obstacle: something that itself blocks the route cannot get anyone past itself. `description` is model-written text: it is shown to the story director and Jev only as untrusted guidance and never decides structure. The Nova fixture maps to Nova (`character`, `moves`), River (`obstacle`, `blocks`) and Castle (`goal`, `goal`); the fixture interpreter reads a drawing as a bridge (`helper`, `carries`) or, with the cloud tool, a storm cloud (`scenery`, `weather`).
+
+### Interactions (Jev)
+
+When a drawing joins the world, `POST /api/interactions` (`{ world, entityId }`, the committed world after the drawing was added) asks Jev one Choice and one Score in a single request: which outcome happens (`crosses`, `flies_over`, `rides_across`, `launched_across`, `almost`, `splash`, `blocked`, `scared`, `sheltered`, `nothing_happens`) and how likely the drawing gets the character to the goal. Jev's state holds structural facts (IDs, roles, properties, boxes, the route and its obstacle, where the drawing sits relative to it); names and descriptions ride along as untrusted child/model text. The response is `{ mode: "live", outcome, odds, confidence, actorId, characterId, obstacleId }`. When Jev's top outcome contradicts the drawing (a ride on something that cannot carry), the server takes Jev's most probable outcome that fits; if none fits it returns `INVALID_MODEL_OUTPUT`.
+
+The director's client commits the outcome as `RESOLVE_INTERACTION { entityId, outcome, odds, confidence, obstacleId }`, where `obstacleId` is the obstacle Jev judged. The reducer checks the outcome fits the world, refuses it if the route's obstacle has changed since or the drawing already has an outcome (each drawing is resolved once and keeps it as `outcome`), records it as the world's `interaction`, and for a success (`crosses`, `flies_over`, `rides_across`, `launched_across`) adds a crossing past the obstacle that closed the route. Failures (`almost`, `splash`, `blocked`, `scared`) keep it blocked (the first three only while something is still in the way), and `sheltered` and `nothing_happens` leave it unchanged. Removing the drawing removes its crossing. The story director narrates the committed outcome (`ride`, `fly_over`, `launch`, `splash`, `react` beats); failures are funny, never "wrong".
+
+Jev is the only resolver: there is no rule table and no fixture outcome. Without `JEV_STORYWORLD_KEY` the route returns `PROVIDER_NOT_CONFIGURED` (503) and the app keeps the drawing without an outcome. With a key, failures are typed and never fall back: `PROVIDER_TIMEOUT` (504), `PROVIDER_RATE_LIMITED` and `PROVIDER_UNAVAILABLE` (503, after up to two short retries of a 429 or 529; the whole call is capped at 6 seconds, under the browser's 8 second abort), `PROVIDER_AUTH_FAILED`, `PROVIDER_FAILED` and `INVALID_MODEL_OUTPUT` (502).
 
 ### Story beat contract
 
@@ -139,16 +149,17 @@ Only the Fastify process may read these server secrets:
 
 ```dotenv
 GEMINI_API_KEY=
+JEV_STORYWORLD_KEY=
 ELEVENLABS_API_KEY=
 ```
 
-Optional server settings: `GEMINI_MODEL` (default `gemini-3.6-flash`), `GEMINI_TIMEOUT_MS` (default `8000`, kept below the browser's 10 second abort), and `GEMINI_SCENE_TIMEOUT_MS` (default `20000`; a whole scene takes about 7-9 seconds).
+Optional server settings: `GEMINI_MODEL` (default `gemini-3.6-flash`), `GEMINI_TIMEOUT_MS` (default `8000`, kept below the browser's 10 second abort), `GEMINI_SCENE_TIMEOUT_MS` (default `20000`; a whole scene takes about 7-9 seconds), `JEV_MODEL` (default `jev-latest`) and `JEV_TIMEOUT_MS` (default `4000`).
 
 Never prefix provider secrets with `VITE_`, commit `.env`, or paste keys into an issue, chat, screenshot, or pull request.
 
 ### Gemini interpretation behavior
 
-With a key, `/api/interpret/edit` sends the narration and drawing to Gemini with a structured-output schema. Gemini only chooses what the child added (a role of `obstacle`, `helper`, or `scenery`, its properties, a short description), a friendly name, and a confidence; the selected tool is sent as an advisory `hint` (`bridge`, `cloud`, or `shelter`), which the keyless fixture uses directly; the server builds the `CREATE_ENTITY` operation with its own ID and the drawn `changedRegion` as bounds, then validates it with the shared contract. Nothing from the model writes to SpacetimeDB. `/api/health` reports `providerMode` and `storyProviderMode` as `live` or `fixture`.
+With a key, `/api/interpret/edit` sends the narration and drawing to Gemini with a structured-output schema. Gemini only chooses what the child added (a role of `obstacle`, `helper`, or `scenery`, its properties, a short description), a friendly name, and a confidence; the selected tool is sent as an advisory `hint` (`bridge`, `cloud`, or `shelter`), which the keyless fixture uses directly; the server builds the `CREATE_ENTITY` operation with its own ID and the drawn `changedRegion` as bounds, then validates it with the shared contract. Nothing from the model writes to SpacetimeDB. `/api/health` reports `providerMode` and `storyProviderMode` as `live` or `fixture`, and `interactionProviderMode` as `live` or `not_configured`.
 
 If Gemini fails, the route does not fall back to the fixture. It returns a recoverable error and the drawing is untouched:
 
@@ -236,8 +247,10 @@ original request ID.
 
 Maincloud `storyworld-zhvbk` is already published with the foundation schema.
 Its first migration did not run `init`, so the metadata row
-(`id='schema'`, `schema_version=1`) was inserted manually. This room work does
-not change the module; do not republish it for this PR.
+(`id='schema'`, `schema_version=1`) was inserted manually. Schema version 3
+(interaction outcomes and sketches) changes the stored world JSON but no tables
+or reducer signatures; publishing it stamps the new version, and rooms made
+under version 2 are refused with a kind message.
 
 To publish the tested module to the shared Maincloud database, first confirm that the module matches the intended empty database and do not use `--delete-data`:
 

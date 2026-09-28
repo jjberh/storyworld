@@ -17,7 +17,7 @@ export function isBlocker(entity: Traits): boolean {
   return has(entity, "blocks");
 }
 
-/** Can carry the character over a blocker it spans (a bridge, a raft). */
+/** A helper that can carry the character (a bridge, a raft). */
 export function isSpanner(entity: Traits): boolean {
   return entity.role === "helper" && has(entity, "carries");
 }
@@ -49,29 +49,16 @@ export function liesAcross(
   return Math.min(start, end) < b.x && Math.max(start, end) > b.x + b.width;
 }
 
-/** Does `helper` reach across `blocker` and overlap it vertically? */
-export function spans(
-  helper: Pick<Entity, "bounds">,
-  blocker: Pick<Entity, "bounds">,
-): boolean {
-  const h = helper.bounds;
-  const b = blocker.bounds;
-  return (
-    h.x <= b.x &&
-    h.x + h.width >= b.x + b.width &&
-    h.y + h.height > b.y &&
-    h.y < b.y + b.height
-  );
-}
+type Route = Pick<WorldState, "entities" | "goal"> &
+  Partial<Pick<WorldState, "crossings">>;
 
 /**
- * The blockers that close the goal route: things that `block`, lie across the
- * route from the goal's character to its target, and are not spanned by a
- * helper that `carries`. Nearest to the character first; empty without a goal.
+ * Everything that `blocks` and lies across the route from the goal's
+ * character to its target, crossed or not. Nearest to the character first;
+ * empty without a goal. `excluding` leaves one entity out (the drawing
+ * being judged is never its own obstacle).
  */
-export function routeBlockers(
-  world: Pick<WorldState, "entities" | "goal">,
-): Entity[] {
+export function routeObstacles(world: Route, excluding?: string): Entity[] {
   const character = world.entities.find(
     (entity) => entity.id === world.goal?.characterId,
   );
@@ -79,15 +66,14 @@ export function routeBlockers(
     (entity) => entity.id === world.goal?.targetId,
   );
   if (!character || !target) return [];
-  const spanners = world.entities.filter(isSpanner);
   return world.entities
     .filter(
       (entity) =>
         isBlocker(entity) &&
+        entity.id !== excluding &&
         entity.id !== character.id &&
         entity.id !== target.id &&
-        liesAcross(entity, character, target) &&
-        !spanners.some((helper) => spans(helper, entity)),
+        liesAcross(entity, character, target),
     )
     .sort(
       (a, b) =>
@@ -97,14 +83,29 @@ export function routeBlockers(
 }
 
 /**
+ * The route obstacles that still close the way: those no committed
+ * interaction has got the character past (see `crossings`). Only a resolved
+ * interaction opens a route; a drawing's geometry alone never does.
+ */
+export function routeBlockers(world: Route, excluding?: string): Entity[] {
+  const crossed = new Set(
+    (world.crossings ?? []).map((crossing) => crossing.obstacleId),
+  );
+  return routeObstacles(world, excluding).filter(
+    (entity) => !crossed.has(entity.id),
+  );
+}
+
+/**
  * The obstacle to blame for a blocked route: one the character is afraid of
  * if it is among the route's blockers, else the nearest. Undefined when
  * nothing blocks the route.
  */
 export function blockingObstacle(
-  world: Pick<WorldState, "entities" | "goal" | "rules">,
+  world: Route & Pick<WorldState, "rules">,
+  excluding?: string,
 ): Entity | undefined {
-  const blockers = routeBlockers(world);
+  const blockers = routeBlockers(world, excluding);
   const feared = blockers.find((blocker) =>
     world.rules.some(
       (rule) =>

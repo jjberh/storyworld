@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { drawOnStory, mockEdit, mockJev } from "./story-mocks";
 
 const response = {
   mode: "live",
@@ -143,8 +144,13 @@ test("a committed bridge stays visible while directing is delayed", async ({
       },
     });
   });
+  await mockEdit(page, {
+    name: "Bridge",
+    properties: ["carries"],
+    idPrefix: "bridge",
+  });
   await startRoom(page);
-  await page.getByRole("button", { name: "Add sample bridge" }).click();
+  await drawOnStory(page);
   const bridge = page.locator('[data-entity-id^="bridge"]');
   await expect(bridge).toBeVisible();
   await expect(bridge).toHaveAttribute("data-reveal-state", "visible");
@@ -189,8 +195,13 @@ test("a delayed older response cannot replace the newest event", async ({
       },
     });
   });
+  await mockEdit(page, {
+    name: "Bridge",
+    properties: ["carries"],
+    idPrefix: "bridge",
+  });
   await startRoom(page);
-  await page.getByRole("button", { name: "Add sample bridge" }).click();
+  await drawOnStory(page);
   await expect(page.locator(".paper-theater-caption")).toContainText(
     "The newest bridge moment wins.",
   );
@@ -223,39 +234,234 @@ test("starting a story opens an addressable room with the confirmed picture", as
   );
 });
 
-test("a committed sample bridge crosses the river and celebrates", async ({
+test("a drawn bridge that Jev lets cross opens the route and celebrates", async ({
   page,
 }) => {
+  let releaseJev!: () => void;
+  const inputs = await mockEdit(page, {
+    name: "Bridge",
+    properties: ["carries"],
+    idPrefix: "bridge",
+  });
+  const asked = await mockJev(page, "crosses", {
+    gate: new Promise<void>((resolve) => {
+      releaseJev = resolve;
+    }),
+  });
   await startRoom(page);
   const hero = page.locator('[data-entity-id="fox"]');
   await expect(hero).toHaveAttribute("data-placement", "near-obstacle");
   const riverbankX = Number(await hero.getAttribute("data-logical-x"));
   await expect(page.getByText("River blocks the route")).toBeVisible();
-  await page.getByRole("button", { name: "Add sample bridge" }).click();
+  await expect(
+    page.getByRole("button", { name: /sample bridge|storm cloud/i }),
+  ).toHaveCount(0);
+  await drawOnStory(page);
+  // Gemini is sent the new lines over the faded picture, and where they are.
+  expect(inputs[0]!.image).toMatch(/^data:image\/jpeg;base64,/);
+  expect(inputs[0]!.changedRegion).toMatchObject({ width: expect.any(Number) });
+  // The drawing commits before Jev answers, and adding it opens nothing.
+  const bridge = page.locator('[data-entity-id="bridge-1"]');
+  // The new drawing gets its own reveal moment before Jev decides anything.
   await expect(page.locator(".paper-theater-caption")).toContainText(
-    "unfolds across the water",
+    "Bridge joins the story.",
   );
+  await expect(bridge).toHaveAttribute("data-reveal-state", "visible");
+  await expect(page.getByTestId("pending-cutout")).toHaveCount(0);
+  await expect(page.getByText(/01 · Bridge added/)).toBeVisible();
+  await expect(page.getByText("River blocks the route")).toBeVisible();
   await expect(hero).toHaveAttribute("data-placement", "near-obstacle");
   expect(Number(await hero.getAttribute("data-logical-x"))).toBe(riverbankX);
+  await expect.poll(() => asked).toEqual(["bridge-1"]);
+  releaseJev();
   await expect(
-    page.getByText(/Paper bridge added · route opened/),
+    page.getByText(/02 · Bridge: a way across · route opened/),
   ).toBeVisible();
   await expect(page.getByText(/Fox made it across!/)).toBeVisible();
   await expect(hero).toHaveAttribute("data-placement", "target-side");
   const targetSideX = Number(await hero.getAttribute("data-logical-x"));
   expect(targetSideX).toBeGreaterThan(riverbankX);
   await expect(page.getByText("Route opened", { exact: true })).toBeVisible();
-
-  await page.getByRole("button", { name: "Add sample bridge" }).click();
-  await page.waitForTimeout(800);
-  await expect(page.locator(".paper-theater-caption")).toContainText(
-    "unfolds across the water",
+  await expect(page.locator(".drawing-note")).toHaveText(
+    "The bridge holds. Fox has a way through.",
   );
+
+  // A second crossing on an open route keeps Fox where it is.
+  await drawOnStory(page, [0.4, 0.75], [0.62, 0.77]);
+  await expect(page.getByText(/04 · Bridge: a way across/)).toBeVisible();
+  await page.waitForTimeout(800);
   await expect(page.locator(".paper-theater-caption")).not.toContainText(
-    "still needs",
+    "still",
   );
   await expect(hero).toHaveAttribute("data-placement", "target-side");
   expect(Number(await hero.getAttribute("data-logical-x"))).toBe(targetSideX);
+});
+
+test("slow strokes drawn close together become one drawing", async ({
+  page,
+}) => {
+  const inputs = await mockEdit(page, {
+    name: "Balloon",
+    properties: ["flies", "carries"],
+  });
+  await mockJev(page, "flies_over");
+  await startRoom(page);
+  await page.getByRole("button", { name: "Draw something new" }).click();
+  const layer = () =>
+    page.getByTestId("story-drawing-layer").locator("canvas").last();
+  const stroke = async (points: [number, number][], steps: number) => {
+    const box = (await layer().boundingBox())!;
+    await page.mouse.move(
+      box.x + box.width * points[0]![0],
+      box.y + box.height * points[0]![1],
+    );
+    await page.mouse.down();
+    for (const [x, y] of points.slice(1)) {
+      await page.mouse.move(box.x + box.width * x, box.y + box.height * y, {
+        steps,
+      });
+      // Longer than the settle time while the pointer is still down.
+      await page.waitForTimeout(400);
+    }
+    await page.mouse.up();
+  };
+  await stroke(
+    [
+      [0.45, 0.1],
+      [0.55, 0.1],
+      [0.55, 0.25],
+      [0.45, 0.25],
+    ],
+    6,
+  );
+  await page.waitForTimeout(300);
+  await stroke(
+    [
+      [0.47, 0.3],
+      [0.53, 0.3],
+      [0.53, 0.36],
+      [0.47, 0.36],
+    ],
+    6,
+  );
+  // No Done: the drawing is read once the child pauses.
+  await expect(page.getByText(/02 · Balloon: a flight over/)).toBeVisible();
+  expect(inputs).toHaveLength(1);
+  await expect(page.locator("[data-entity-id]")).toHaveCount(4);
+  await expect(page.getByText(/Fox made it across!/)).toBeVisible();
+});
+
+test("a stroke that ends outside the stage still becomes a drawing", async ({
+  page,
+}) => {
+  const inputs = await mockEdit(page, {
+    name: "Bridge",
+    properties: ["carries"],
+  });
+  await mockJev(page, "crosses");
+  await startRoom(page);
+  await page.getByRole("button", { name: "Draw something new" }).click();
+  const canvas = page
+    .getByTestId("story-drawing-layer")
+    .locator("canvas")
+    .last();
+  await canvas.scrollIntoViewIfNeeded();
+  const box = (await canvas.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.55);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.6, {
+    steps: 10,
+  });
+  // Off the paper entirely, then let go there.
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height + 120, {
+    steps: 10,
+  });
+  await page.mouse.up();
+  await expect(page.getByTestId("pending-cutout")).toHaveCount(1);
+  // No "Done drawing": the pause alone reads it.
+  await expect(page.getByText(/02 · Bridge: a way across/)).toBeVisible();
+  expect(inputs).toHaveLength(1);
+});
+
+test("the child can ask again when Jev could not decide", async ({ page }) => {
+  await mockEdit(page, { name: "Bridge", properties: ["carries"] });
+  let calls = 0;
+  await page.route("**/api/interactions", async (route) => {
+    calls += 1;
+    if (calls === 1)
+      return route.fulfill({
+        status: 503,
+        json: {
+          code: "PROVIDER_RATE_LIMITED",
+          message:
+            "The world is busy deciding other things. Your drawing is still in the story; try again in a moment.",
+          retryable: true,
+        },
+      });
+    const body = route.request().postDataJSON();
+    await route.fulfill({
+      json: {
+        mode: "live",
+        outcome: "crosses",
+        odds: 0.8,
+        confidence: 0.9,
+        actorId: body.entityId,
+        characterId: "fox",
+        obstacleId: "river",
+      },
+    });
+  });
+  await startRoom(page);
+  await drawOnStory(page);
+  await expect(page.locator(".drawing-note")).toContainText("try again");
+  await expect(page.getByText(/01 · Bridge added/)).toBeVisible();
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText(/02 · Bridge: a way across/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
+  expect(calls).toBe(2);
+});
+
+test("a funny failure from Jev keeps the route blocked", async ({ page }) => {
+  await mockEdit(page, { name: "Raft", properties: ["floats"] });
+  await mockJev(page, "splash");
+  await startRoom(page);
+  const hero = page.locator('[data-entity-id="fox"]');
+  await drawOnStory(page);
+  await expect(page.getByText(/02 · Raft: splash!/)).toBeVisible();
+  await expect(page.locator(".paper-theater-caption")).toContainText(
+    "Splash! Fox tumbles into River",
+  );
+  await expect(page.locator(".drawing-note")).toContainText("Splash!");
+  await expect(page.locator(".drawing-note")).not.toContainText(/wrong/i);
+  await expect(page.getByText("River blocks the route")).toBeVisible();
+  await expect(hero).toHaveAttribute("data-placement", "near-obstacle");
+  await expect(page.locator(".paper-confetti")).toHaveCount(0);
+});
+
+test("without Jev a drawing still joins the story and the room says so kindly", async ({
+  page,
+}) => {
+  // No mocks: the keyless API reads the drawing as a fixture and answers
+  // PROVIDER_NOT_CONFIGURED for the interaction.
+  const interactions: number[] = [];
+  page.on("response", (response) => {
+    if (response.url().endsWith("/api/interactions"))
+      interactions.push(response.status());
+  });
+  await startRoom(page);
+  await expect(page.locator("[data-entity-id]")).toHaveCount(3);
+  await expect(
+    page.getByRole("button", { name: /sample bridge|storm cloud/i }),
+  ).toHaveCount(0);
+  await drawOnStory(page);
+  await expect(page.locator(".drawing-note")).toContainText("needs Jev");
+  expect(interactions).toEqual([503]);
+  await expect(page.locator("[data-entity-id]")).toHaveCount(4);
+  await expect(page.getByTestId("pending-cutout")).toHaveCount(0);
+  await expect(page.getByText(/01 · Bridge added/)).toBeVisible();
+  await expect(page.getByText(/^Revision 1$/)).toBeVisible();
+  await expect(page.getByText("River blocks the route")).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("the paper theater keeps its semantic playback on a reduced-motion mobile viewport", async ({
@@ -263,9 +469,11 @@ test("the paper theater keeps its semantic playback on a reduced-motion mobile v
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockEdit(page, { name: "Bridge", properties: ["carries"] });
+  await mockJev(page, "crosses");
   await startRoom(page);
   await expect(page.getByTestId("paper-theater")).toBeVisible();
-  await page.getByRole("button", { name: "Add sample bridge" }).click();
+  await drawOnStory(page);
   await expect(page.getByText(/Fox made it across!/)).toBeVisible();
   await expect(page.locator(".paper-confetti")).toHaveCount(0);
 });

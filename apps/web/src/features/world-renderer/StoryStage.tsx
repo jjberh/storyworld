@@ -105,14 +105,26 @@ export function StoryStage({
     renderer?.setWorld(world);
   }, [renderer, world]);
 
+  // One playback lifetime per renderer. A new sequence is handed to the
+  // renderer without aborting the old one, so the beat on stage finishes
+  // before the new moment plays (the renderer drops the rest of the old one).
+  const playback = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (!renderer) return;
+    const controller = new AbortController();
+    playback.current = controller;
+    return () => {
+      controller.abort();
+      if (playback.current === controller) playback.current = null;
+    };
+  }, [renderer]);
+
   // A committed event ID is the playback key. Presence and proposal renders
   // must not restart a sequence whose committed identity has not changed.
   const sourceEventId = sequence?.sourceEventId;
   useEffect(() => {
-    if (!renderer) return;
-    const controller = new AbortController();
-    void renderer.playSequence(latestSequence.current, controller.signal);
-    return () => controller.abort();
+    if (!renderer || !playback.current) return;
+    void renderer.playSequence(latestSequence.current, playback.current.signal);
   }, [renderer, sourceEventId]);
 
   const fallback = useMemo(() => restingSnapshot(world), [world]);

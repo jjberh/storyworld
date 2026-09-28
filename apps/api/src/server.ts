@@ -1,6 +1,7 @@
 import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "./app";
+import { createInteractionResolver } from "./services/interaction";
 import { createInterpreter } from "./services/interpretation";
 import { createStoryDirector } from "./services/story-director";
 config({
@@ -12,7 +13,8 @@ if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error("PORT must be a valid TCP port.");
 const interpreter = createInterpreter(process.env);
 const storyDirector = createStoryDirector(process.env);
-const app = buildApp({ interpreter, storyDirector });
+const interactionResolver = createInteractionResolver(process.env);
+const app = buildApp({ interpreter, storyDirector, interactionResolver });
 await app.listen({ host: process.env.HOST ?? "0.0.0.0", port });
 console.log(
   "Storyworld API ready on port " +
@@ -21,7 +23,11 @@ console.log(
     interpreter.mode +
     " interpretation, " +
     storyDirector.mode +
-    " story director)",
+    " story director, " +
+    (interactionResolver.mode === "live"
+      ? "Jev interactions"
+      : "interactions need JEV_STORYWORLD_KEY") +
+    ")",
 );
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, () => {

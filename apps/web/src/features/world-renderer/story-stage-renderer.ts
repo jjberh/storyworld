@@ -151,6 +151,9 @@ const INK = 0x3a1b6b;
 const REVEAL_FADE_MS = 240;
 const TITLE_FADE_MS = 450;
 const CAPTION_FONT = "Georgia, 'Times New Roman', serif";
+/** The drawing canvas's crayon, so a sketched piece matches its strokes. */
+const SKETCH_COLOR = 0xdd855c;
+const SKETCH_STROKE_WIDTH = 5;
 
 const tokenColors: Record<EntityLook, number> = {
   span: 0xbd765c,
@@ -288,6 +291,12 @@ export class StoryStageRenderer {
   private readonly offsets = new Map<string, Offset>();
   private readonly placements = new Map<string, Placement>();
   private playback: AbortController | undefined;
+  /** When the beat on stage finishes, on the stage clock. */
+  private beatEndsAtMs = 0;
+  /** A playback told to stop at its current beat's end (see playSequence). */
+  private yieldingPlayback: AbortController | undefined;
+  /** Bumped by every playSequence call; a waiting call gives way to newer. */
+  private playRequests = 0;
   private playedEventId = "";
   private playedBeats = 0;
   private resumeFrom: { eventId: string; beats: number } | undefined;
@@ -350,8 +359,10 @@ export class StoryStageRenderer {
 
   /**
    * Plays one directed sequence beat by beat on the stage clock. Passing
-   * `null` resets the stage to rest. Starting a new sequence cancels the one
-   * in flight. Resolves when the sequence ends or `signal` aborts.
+   * `null` resets the stage to rest. A sequence already playing is never cut
+   * mid-beat: it finishes the beat on stage, then stops, and the new sequence
+   * (or rest) starts. If several arrive while a beat finishes, only the
+   * newest plays. Resolves when the sequence ends or `signal` aborts.
    *
    * `nextWorld`, when given, is shown together with the sequence, so a piece the
    * sequence reveals stays hidden from its first frame instead of flashing in
@@ -363,6 +374,22 @@ export class StoryStageRenderer {
     nextWorld?: WorldState,
   ): Promise<void> {
     if (this.destroyed) return;
+    const request = ++this.playRequests;
+    const running = this.playback;
+    // Wait for the beat on stage to end; a reveal may extend it by a frame
+    // or two while it waits to draw, so check again after each wait.
+    while (
+      running &&
+      this.playback === running &&
+      !running.signal.aborted &&
+      this.beatEndsAtMs > this.clockMs
+    ) {
+      this.yieldingPlayback = running;
+      await this.wait(this.beatEndsAtMs - this.clockMs, signal);
+      if (signal.aborted || this.destroyed || request !== this.playRequests)
+        return;
+    }
+    this.yieldingPlayback = undefined;
     this.playback?.abort();
     const playback = new AbortController();
     this.playback = playback;
@@ -394,6 +421,13 @@ export class StoryStageRenderer {
       for (const [index, storyBeat] of sequence.beats.entries()) {
         if (aborted()) return;
         const action = storyBeat.action;
+        const hold = Math.max(
+          beatHoldMs(action, this.reducedMotion),
+          this.minBeatHoldMs,
+        );
+        // Claim the stage for this beat before any await, so a sequence that
+        // arrives while a reveal waits for its frames still lets it finish.
+        this.beatEndsAtMs = this.clockMs + hold;
         this.caption = storyBeat.narration;
         this.setAction(action);
         this.emit();
@@ -408,10 +442,10 @@ export class StoryStageRenderer {
         this.applyBeatEffects(sequence, index, world);
         this.playedBeats = index + 1;
         this.emit();
-        await this.wait(
-          Math.max(beatHoldMs(action, this.reducedMotion), this.minBeatHoldMs),
-          playback.signal,
-        );
+        this.beatEndsAtMs = this.clockMs + hold;
+        await this.wait(hold, playback.signal);
+        // A newer sequence takes the stage at this beat boundary.
+        if (this.yieldingPlayback === playback) return;
       }
       if (!aborted()) {
         this.setAction(null);
@@ -891,9 +925,11 @@ export class StoryStageRenderer {
     const { entity, container } = view;
     const { width, height } = entity.bounds;
     const crop = this.hasCrop(entity);
+    // A drawing added mid-story is cut from the child's own strokes.
+    const sketch = crop ? undefined : entity.sketch;
     const look = entityLook(entity);
     const drawnAs = [
-      crop ? `crop:${this.imageStatus}` : "token",
+      crop ? `crop:${this.imageStatus}` : sketch ? "sketch" : "token",
       look,
       entity.name,
       width,
@@ -909,7 +945,7 @@ export class StoryStageRenderer {
     view.glow.alpha = 0;
     container.addChild(view.glow);
 
-    const shape: EntityLook = crop ? "thing" : look;
+    const shape: EntityLook = crop || sketch ? "thing" : look;
     const shadow = new Graphics();
     tokenShape(shadow, shape, width, height, 2, 6).fill({
       color: INK,
@@ -925,9 +961,28 @@ export class StoryStageRenderer {
     });
     const edge = new Graphics();
     tokenShape(edge, shape, width, height, 3).fill(
-      look === "span" && !crop ? 0xf8deb8 : PAPER_EDGE,
+      look === "span" && !crop && !sketch ? 0xf8deb8 : PAPER_EDGE,
     );
     container.addChild(shadow, edge);
+
+    if (sketch) {
+      const left = entity.bounds.x + width / 2;
+      const top = entity.bounds.y + height / 2;
+      const lines = new Graphics();
+      for (const stroke of sketch.strokes) {
+        lines.moveTo(stroke[0]! - left, stroke[1]! - top);
+        for (let index = 2; index < stroke.length; index += 2)
+          lines.lineTo(stroke[index]! - left, stroke[index + 1]! - top);
+      }
+      lines.stroke({
+        width: SKETCH_STROKE_WIDTH,
+        color: SKETCH_COLOR,
+        cap: "round",
+        join: "round",
+      });
+      container.addChild(lines);
+      return;
+    }
 
     const texture =
       crop && this.imageStatus === "loaded"

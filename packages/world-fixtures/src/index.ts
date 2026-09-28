@@ -16,6 +16,7 @@ import {
 } from "@storyworld/contracts";
 import { worldFromScene } from "@storyworld/contracts/scene";
 import { presetTraits } from "@storyworld/contracts/entity-traits";
+import { proposalProblem } from "@storyworld/contracts/interaction";
 export function bridgeOperation(
   id = "bridge-" + crypto.randomUUID(),
 ): WorldOperation {
@@ -148,6 +149,8 @@ export class FixtureWorldClient implements WorldClient {
     this.emit();
   }
   async propose(operation: WorldOperation) {
+    const problem = proposalProblem(operation, this.snapshot.world!);
+    if (problem) throw new Error(problem);
     this.snapshot = {
       ...this.snapshot,
       proposals: [

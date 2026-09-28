@@ -53,6 +53,8 @@ export function worldFromScene(id: string, input: ConfirmedScene): WorldState {
     goal: null,
     weather: "clear",
     pathStatus: "idle",
+    interaction: null,
+    crossings: [],
   };
   return { ...operations.reduce(applyOperation, empty), revision: 0 };
 }

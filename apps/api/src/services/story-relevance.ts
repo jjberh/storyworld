@@ -4,6 +4,8 @@ import type {
   StorySequenceRequest,
 } from "@storyworld/contracts";
 import { isBlocker, routeBlockers } from "@storyworld/contracts/entity-traits";
+import { storyCharacter } from "@storyworld/contracts/interaction";
+import { freshInteraction } from "@storyworld/contracts/interaction-story";
 
 function referencedIds(action: StoryAction) {
   switch (action.type) {
@@ -60,6 +62,20 @@ export function storyBeatsMatchEventDelta(
 
   if (!previous) return true;
 
+  // A freshly resolved interaction must show the drawing that acted or the
+  // character it happened to (a crossing is naturally the character's move,
+  // a funny miss is the character stopped by the obstacle).
+  const interaction = freshInteraction(current);
+  const involved = [interaction?.entityId, storyCharacter(current)?.id];
+  if (
+    interaction &&
+    previous.interaction?.revision !== interaction.revision &&
+    !actions.some((action) =>
+      referencedIds(action).some((id) => involved.includes(id)),
+    )
+  )
+    return false;
+
   const removedEntityIds = previous.entities
     .filter((entity) => !currentEntityIds.has(entity.id))
     .map((entity) => entity.id);
@@ -73,14 +89,15 @@ export function storyBeatsMatchEventDelta(
     return false;
 
   const goal = current.goal;
-  // Riding a helper to the goal counts as heading there, but only on an open
-  // route: the committed path status is authoritative.
+  // Riding or being launched to the goal counts as heading there, but only on
+  // an open route: the committed path status is authoritative.
   const goalMoveMatches =
     goal &&
     actions.some(
       (action) =>
         (action.type === "move_toward" ||
-          (action.type === "ride" && current.pathStatus === "available")) &&
+          ((action.type === "ride" || action.type === "launch") &&
+            current.pathStatus === "available")) &&
         action.entityId === goal.characterId &&
         action.targetId === goal.targetId,
     );

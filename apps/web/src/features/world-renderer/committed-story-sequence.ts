@@ -6,9 +6,9 @@ import {
 } from "@storyworld/contracts/story-beat";
 import {
   blockingObstacle,
-  isSpanner,
   makesRain,
 } from "@storyworld/contracts/entity-traits";
+import { interactionBeats } from "@storyworld/contracts/interaction-story";
 
 function beat(
   event: WorldEvent,
@@ -93,7 +93,9 @@ export function sequenceFromCommittedEvents(
 ): StorySequence | null {
   let beats: StoryBeat[] = [];
   const additions = addedEntities(latest.state, previous?.state);
-  const bridge = additions.find(isSpanner);
+  const outcome = previous
+    ? interactionBeats(latest.state, previous.state)
+    : [];
   const cloud = additions.find(makesRain);
   const character = latest.state.entities.find(
     (entity) => entity.id === latest.state.goal?.characterId,
@@ -105,49 +107,10 @@ export function sequenceFromCommittedEvents(
 
   if (!previous) {
     beats = openingBeats(latest);
-  } else if (bridge) {
-    beats.push(
-      beat(latest, 0, {
-        narration: `${bridge.name} unfolds across the water.`,
-        mood: "curious",
-        action: { type: "reveal", entityId: bridge.id },
-      }),
-    );
-    if (
-      previous.state.pathStatus !== "available" &&
-      latest.state.pathStatus === "available" &&
-      character &&
-      target
-    ) {
-      beats.push(
-        beat(latest, 1, {
-          narration: `${character.name} can cross toward ${target.name}!`,
-          mood: "delighted",
-          action: {
-            type: "move_toward",
-            entityId: character.id,
-            targetId: target.id,
-          },
-        }),
-        beat(latest, 2, {
-          narration: `${character.name} made it across!`,
-          mood: "delighted",
-          action: { type: "celebrate", entityId: character.id },
-        }),
-      );
-    } else if (latest.state.pathStatus === "blocked" && character && river) {
-      beats.push(
-        beat(latest, 1, {
-          narration: `${character.name} still needs a bridge that reaches both banks.`,
-          mood: "worried",
-          action: {
-            type: "blocked_by",
-            entityId: character.id,
-            obstacleId: river.id,
-          },
-        }),
-      );
-    }
+  } else if (outcome.length > 0) {
+    // A committed interaction outcome, narrated the same way as the keyless
+    // story director does.
+    beats = outcome.map((input, index) => beat(latest, index, input));
   } else if (cloud) {
     beats = [
       beat(latest, 0, {

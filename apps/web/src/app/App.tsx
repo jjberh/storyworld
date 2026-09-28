@@ -6,11 +6,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { motion } from "framer-motion";
-import {
-  FixtureWorldClient,
-  bridgeOperation,
-  cloudOperation,
-} from "@storyworld/world-fixtures";
+import { FixtureWorldClient } from "@storyworld/world-fixtures";
 import type {
   Bounds,
   ClientSnapshot,
@@ -20,7 +16,6 @@ import type {
   InterpretationInput,
   InterpretationOutput,
 } from "@storyworld/contracts";
-import { isSpanner } from "@storyworld/contracts/entity-traits";
 import { readDrawing } from "../features/canvas/drawing-image";
 import { WorldStage } from "../features/world-renderer/WorldStage";
 import { DrawingCanvas } from "../features/canvas/DrawingCanvas";
@@ -34,14 +29,33 @@ import sunIcon from "../assets/figma/sun.svg";
 import scribblesImage from "../assets/figma/scribbles.svg";
 import { InitialAuthoring } from "./InitialAuthoring";
 import { StoryRoom } from "./StoryRoom";
+import {
+  NEEDS_JEV_NOTE,
+  outcomeNote,
+  resolveDrawingInteraction,
+  type InteractionResult,
+} from "./story-drawing";
 
+/** What the Nova page says once Jev has (or has not) decided. */
+function interactionNote(result: InteractionResult, drawing: string) {
+  if (result.kind === "resolved")
+    return outcomeNote(result.outcome, { drawing, character: "Nova" });
+  return result.kind === "needs-jev" ? NEEDS_JEV_NOTE : result.message;
+}
+
+/**
+ * Changes whenever the world is reset or restored. Events carry no operation
+ * type, so this matches the exact summaries the reset and rewind commands
+ * write; a drawing's name (which comes from the child) never matches them.
+ */
 function drawingVersion(snapshot: ClientSnapshot) {
   return (
     (snapshot.world?.id ?? "") +
     ":" +
     snapshot.events.filter(
       (event) =>
-        event.summary.includes("reset") || event.summary.includes("Restored"),
+        event.summary === "World reset" ||
+        /^Restored revision \d+$/.test(event.summary),
     ).length
   );
 }
@@ -80,12 +94,6 @@ export function FixtureExperience() {
     "Nova wants to reach the castle, but she is afraid of water.",
   );
   const container = useRef<HTMLDivElement>(null);
-  const pendingFeedback = useRef<{
-    revision: number;
-    fallback: string;
-    entityId?: string;
-    bridge: boolean;
-  } | null>(null);
   const [width, setWidth] = useState(800);
   const version = drawingVersion(snapshot);
   const previousVersion = useRef(version);
@@ -94,7 +102,6 @@ export function FixtureExperience() {
     previousVersion.current = version;
     // World restores also invalidate in-flight interpretations and retry images.
     interpreting.current = false;
-    pendingFeedback.current = null;
     setReference(undefined);
     setLastDrawing(undefined);
     setPreview(undefined);
@@ -112,28 +119,6 @@ export function FixtureExperience() {
     );
     observer.observe(container.current);
     return () => observer.disconnect();
-  }, [snapshot.world]);
-  useEffect(() => {
-    const pending = pendingFeedback.current;
-    const confirmed = snapshot.world;
-    if (!pending || !confirmed || confirmed.revision <= pending.revision)
-      return;
-    if (
-      pending.entityId &&
-      !confirmed.entities.some((entity) => entity.id === pending.entityId)
-    )
-      return;
-    pendingFeedback.current = null;
-    setPhase("ready");
-    setNote(
-      !pending.bridge
-        ? pending.fallback
-        : confirmed.pathStatus === "available"
-          ? "The bridge holds. Nova has a way through."
-          : confirmed.entities.some(isSpanner)
-            ? "Almost there — the bridge needs to reach both riverbanks."
-            : pending.fallback,
-    );
   }, [snapshot.world]);
   async function run(action: () => Promise<void>) {
     setError("");
@@ -163,21 +148,22 @@ export function FixtureExperience() {
           setPhase("ready");
           setNote("Your proposal is ready for the director.");
         } else {
-          pendingFeedback.current = {
-            revision: client.getSnapshot().world?.revision ?? -1,
-            fallback: result.message,
-            entityId:
-              candidate.operation.type === "CREATE_ENTITY"
-                ? candidate.operation.entity.id
-                : undefined,
-            bridge:
-              candidate.operation.type === "CREATE_ENTITY" &&
-              isSpanner(candidate.operation.entity),
-          };
+          const version = drawingVersion(client.getSnapshot());
           await client.apply(candidate.operation);
+          if (candidate.operation.type !== "CREATE_ENTITY") {
+            setPhase("ready");
+            setNote(result.message);
+            return;
+          }
+          // The drawing is in the world; Jev decides what it does.
+          const { id, name } = candidate.operation.entity;
+          setNote(`${name} is in the world. Seeing what happens…`);
+          const outcome = await resolveDrawingInteraction(client, id);
+          if (version !== drawingVersion(client.getSnapshot())) return;
+          setPhase("ready");
+          setNote(interactionNote(outcome, name));
         }
       } catch (error) {
-        pendingFeedback.current = null;
         setPhase("ready");
         setNote(
           "Your drawing is still here. Check your connection before trying another change.",
@@ -421,7 +407,8 @@ export function FixtureExperience() {
             <div className="proposals-card">
               <h2>The World Listens</h2>
               <p className="card-help">
-                Click to propose live doodles to the director
+                Draw on the page. Your drawing joins the world, then Jev decides
+                what happens.
               </p>
               <motion.p
                 key={note}
@@ -484,32 +471,6 @@ export function FixtureExperience() {
                 </button>
               )}
               <div className="actions">
-                <button
-                  className="primary-action"
-                  disabled={drawingBusy}
-                  onClick={() =>
-                    void run(() =>
-                      contributor
-                        ? client.propose(bridgeOperation())
-                        : client.apply(bridgeOperation()),
-                    )
-                  }
-                >
-                  {contributor ? "Propose" : "Add"} sample bridge
-                </button>
-                <button
-                  className="secondary-action"
-                  disabled={drawingBusy}
-                  onClick={() =>
-                    void run(() =>
-                      contributor
-                        ? client.propose(cloudOperation())
-                        : client.apply(cloudOperation()),
-                    )
-                  }
-                >
-                  {contributor ? "Propose" : "Add"} storm cloud
-                </button>
                 {snapshot.isDirector && !requestedGuest && (
                   <button
                     className="quiet"
@@ -578,7 +539,24 @@ export function FixtureExperience() {
                       <button
                         disabled={busy}
                         onClick={() =>
-                          void run(() => client.resolveProposal(p.id, true))
+                          void run(async () => {
+                            const version = drawingVersion(
+                              client.getSnapshot(),
+                            );
+                            await client.resolveProposal(p.id, true);
+                            if (p.operation.type !== "CREATE_ENTITY") return;
+                            const { id, name } = p.operation.entity;
+                            const outcome = await resolveDrawingInteraction(
+                              client,
+                              id,
+                            );
+                            // A reset or rewind meanwhile has its own note.
+                            if (
+                              version !== drawingVersion(client.getSnapshot())
+                            )
+                              return;
+                            setNote(interactionNote(outcome, name));
+                          })
                         }
                       >
                         Accept
