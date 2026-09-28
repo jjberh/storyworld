@@ -45,7 +45,7 @@ test("fixture bridge opens route, cloud brings rain, and reset restores world", 
   await page.getByRole("button", { name: "Cloud" }).click();
   await drawOnNova(page, [0.6, 0.15], [0.72, 0.2]);
   await expect(
-    page.getByRole("button", { name: /Storm cloud added/ }),
+    page.locator(".moments-card").getByText(/Storm cloud added/),
   ).toBeVisible();
   await expect(
     page.getByText("Storm cloud is part of the picture now."),
@@ -109,7 +109,7 @@ test("without Jev the Nova drawing joins the world and the route stays blocked",
   await drawOnNova(page, [0.38, 0.56], [0.59, 0.59]);
   await expect(page.getByText(/needs Jev/)).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /Bridge added/ }),
+    page.locator(".moments-card").getByText(/Bridge added/),
   ).toBeVisible();
   await expect(page.getByText("River blocks the route")).toBeVisible();
 });

@@ -749,6 +749,13 @@ h2 {
   display: grid;
   gap: 16px;
 }
+.timeline {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
 .timeline-item {
   display: flex;
   align-items: center;
@@ -774,10 +781,6 @@ h2 {
 }
 .timeline-item strong {
   font-size: 11px;
-}
-.timeline-item small {
-  color: #6b5885;
-  font-size: 10px;
 }
 .proposal {
   padding: 12px;
