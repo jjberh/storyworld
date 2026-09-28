@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export type Bounds = { x: number; y: number; width: number; height: number };
 export type ImageBounds = {
   x: number;
@@ -63,8 +63,11 @@ export type Interaction = {
   /** The drawing that acted. */
   entityId: string;
   outcome: InteractionOutcome;
-  /** How likely the drawing was to get the character to its goal, 0 to 1. */
-  odds: number;
+  /**
+   * How likely the drawing was to get the character to its goal, 0 to 1.
+   * Null in free play: with no goal Jev is not asked.
+   */
+  odds: number | null;
   /** The resolver's confidence in the outcome, 0 to 1. */
   confidence: number;
   /** The route obstacle the outcome was about, if there was one. */
@@ -116,7 +119,8 @@ export type WorldOperation =
       type: "RESOLVE_INTERACTION";
       entityId: string;
       outcome: InteractionOutcome;
-      odds: number;
+      /** Jev's odds of reaching the goal; null exactly when there is no goal. */
+      odds: number | null;
       confidence: number;
       /**
        * The route obstacle Jev judged against (null when none). The reducer
@@ -131,7 +135,12 @@ export type WorldState = {
   entities: Entity[];
   rules: WorldRule[];
   goal: { characterId: string; targetId: string } | null;
-  pathStatus: "idle" | "blocked" | "available";
+  /**
+   * The route from the character to its goal. `free_play` when there is a
+   * character but no goal: nothing to reach, the child just plays. `idle`
+   * when there is no character yet.
+   */
+  pathStatus: "idle" | "free_play" | "blocked" | "available";
   weather: "clear" | "rain";
   interaction: Interaction | null;
   crossings: RouteCrossing[];

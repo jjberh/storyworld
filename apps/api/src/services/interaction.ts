@@ -6,7 +6,9 @@ import type {
   InteractionResponse,
   WorldState,
 } from "@storyworld/contracts";
+import { hasReachableGoal } from "@storyworld/contracts/entity-traits";
 import {
+  FREE_PLAY_OUTCOMES,
   INTERACTION_OUTCOMES,
   interactionObstacle,
   interactionProblem,
@@ -17,11 +19,12 @@ import { ApiError } from "./errors";
 
 // The interaction resolver: when a new drawing enters the world, Jev decides
 // what happens (one outcome from a closed list) and how likely the drawing is
-// to get the character to its goal. Jev is the only resolver. There is no
-// rule table and no fixture fallback: without a key the route answers
-// PROVIDER_NOT_CONFIGURED, and with a key every provider failure is a typed
-// error. The resolver only proposes; the client commits the outcome through
-// the RESOLVE_INTERACTION reducer.
+// to get the character to its goal. In free play (no goal) Jev is asked only
+// what happens, from the outcomes that fit without a route, and the odds are
+// null. Jev is the only resolver. There is no rule table and no fixture
+// fallback: without a key the route answers PROVIDER_NOT_CONFIGURED, and with
+// a key every provider failure is a typed error. The resolver only proposes;
+// the client commits the outcome through the RESOLVE_INTERACTION reducer.
 
 export type InteractionResolver = {
   mode: "live" | "not_configured";
@@ -63,6 +66,8 @@ const messages = {
     "Interactions are not set up correctly. Your drawing is still in the story.",
   failed:
     "The world had a problem deciding what happens. Your drawing is still in the story.",
+  nothingToDecide:
+    "There is nobody here to react to this drawing yet. It is still in the story.",
 };
 
 // ---- the questions ---------------------------------------------------------
@@ -92,7 +97,7 @@ export const OUTCOME_CRITERIA: Record<InteractionOutcome, string> = {
   sheltered:
     "`newDrawing` or something nearby keeps the character cozy and dry, like a house, tent, umbrella or big tree while it rains.",
   nothing_happens:
-    "Nobody tries to use `newDrawing` to get across; it is just part of the picture, like the sun, a cloud, a tree or a bird far away. Also the answer when there is no goal.",
+    "Nobody tries to use `newDrawing` to get across; it is just part of the picture, like the sun, a cloud, a tree or a bird far away.",
 };
 
 /** Ordered situations, lowest to highest chance of reaching the goal. */
@@ -126,6 +131,48 @@ const questions = {
     criteria: ODDS_LEVELS,
   },
 } as const;
+
+/**
+ * Free-play wording for the outcomes that fit without a goal. There is no
+ * route, so nothing is about getting across.
+ */
+export const FREE_PLAY_CRITERIA: Partial<Record<InteractionOutcome, string>> = {
+  nothing_happens:
+    "`newDrawing` is a friendly, fun or harmless new part of the picture, like the sun, a tree, a flower, a ball, a pet or a new friend, so `character` happily goes to see it and plays.",
+  scared: OUTCOME_CRITERIA.scared,
+  sheltered: OUTCOME_CRITERIA.sheltered,
+};
+
+/**
+ * The free-play question: only what happens, only among the outcomes this
+ * world can present, and no odds (there is no goal to reach).
+ */
+export function freePlayQuestions(world: WorldState, entityId: string) {
+  const fitting = FREE_PLAY_OUTCOMES.filter(
+    (outcome) => !interactionProblem(world, entityId, outcome),
+  );
+  // With a character, `nothing_happens` and `scared` always fit. Fewer means
+  // there is nobody to react (or the drawing is the character), so there is
+  // no choice for Jev to make.
+  if (fitting.length < 2) throw nothingToDecide();
+  return {
+    outcome: {
+      type: "choice",
+      instructions: {
+        question:
+          "In this children's picture story there is no place to reach: `character` is free to play. What happens when `newDrawing` joins the world?",
+        facts: [
+          "`abilities` list what each thing can do (flies, floats, swims, carries, launches, shelters, scares, ...). Judge `newDrawing` mostly by its abilities and what it is.",
+          "There is no goal and no route, so nobody needs to get across anything.",
+        ],
+        text: questions.outcome.instructions.text,
+      },
+      criteria: Object.fromEntries(
+        fitting.map((outcome) => [outcome, FREE_PLAY_CRITERIA[outcome]!]),
+      ),
+    },
+  } as const;
+}
 
 // ---- the state -------------------------------------------------------------
 
@@ -201,7 +248,7 @@ export function interactionState(world: WorldState, entityId: string) {
           ? "open: the character can already reach the goal"
           : world.pathStatus === "blocked"
             ? "blocked: something is in the way"
-            : "none: there is no goal to reach",
+            : "none: there is no goal to reach, the character is free to play",
       obstacle: obstacle ? describe(obstacle) : null,
     },
     newDrawing: { ...describe(actor), placement: placement(actor, obstacle) },
@@ -231,21 +278,27 @@ const scoreAnswer = z.object({
   confidence: z.number().min(0).max(1),
 });
 
+// `odds` is only asked when the world has a goal; the resolver checks it
+// came back when it was asked.
 const jevResponse = z.object({
-  answers: z.object({ outcome: choiceAnswer, odds: scoreAnswer }),
+  answers: z.object({ outcome: choiceAnswer, odds: scoreAnswer.optional() }),
 });
+
+type JevQuestions = typeof questions | ReturnType<typeof freePlayQuestions>;
 
 const defaultSleep = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 /**
- * One Jev request (both questions together), retrying only 429 and 529 with
- * the configured backoff. Every failure becomes an ApiError whose message is
- * safe for a child and never carries the key or the upstream body.
+ * One Jev request (all questions together, both by default), retrying only
+ * 429 and 529 with the configured backoff. Every failure becomes an ApiError
+ * whose message is safe for a child and never carries the key or the
+ * upstream body.
  */
 export async function askJev(
   options: JevOptions,
   state: unknown,
+  asked: JevQuestions = questions,
 ): Promise<z.infer<typeof jevResponse>> {
   const sleep = options.sleep ?? defaultSleep;
   const now = options.now ?? Date.now;
@@ -268,7 +321,7 @@ export async function askJev(
           Authorization: "Bearer " + options.apiKey,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ model: options.model, state, questions }),
+        body: JSON.stringify({ model: options.model, state, questions: asked }),
         signal,
       });
     } catch (error) {
@@ -312,6 +365,10 @@ export async function askJev(
     if (!parsed.success) throw invalidOutput();
     return parsed.data;
   }
+}
+
+function nothingToDecide() {
+  return new ApiError(422, "NOTHING_TO_DECIDE", messages.nothingToDecide);
 }
 
 function invalidOutput() {
@@ -360,15 +417,28 @@ function liveResolver(options: JevOptions): InteractionResolver {
   return {
     mode: "live",
     async resolve({ world, entityId }) {
-      const answers = (await askJev(options, interactionState(world, entityId)))
-        .answers;
+      // Free play skips the odds question: there is no goal to reach.
+      const goal = hasReachableGoal(world);
+      const answers = (
+        await askJev(
+          options,
+          interactionState(world, entityId),
+          goal ? questions : freePlayQuestions(world, entityId),
+        )
+      ).answers;
       const outcome = chooseOutcome(world, entityId, answers.outcome);
-      const odds =
-        Math.round((answers.odds.score / (ODDS_LEVELS.length - 1)) * 100) / 100;
+      let odds: number | null = null;
+      if (goal) {
+        if (!answers.odds) throw invalidOutput();
+        const score =
+          Math.round((answers.odds.score / (ODDS_LEVELS.length - 1)) * 100) /
+          100;
+        odds = Math.min(1, Math.max(0, score));
+      }
       const result = interactionResponseSchema.safeParse({
         mode: "live",
         outcome,
-        odds: Math.min(1, Math.max(0, odds)),
+        odds,
         confidence: Math.round(answers.outcome.confidence * 100) / 100,
         actorId: entityId,
         characterId: storyCharacter(world)?.id ?? null,

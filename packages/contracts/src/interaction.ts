@@ -8,6 +8,7 @@ import type {
 import {
   blockingObstacle,
   has,
+  hasReachableGoal,
   routeBlockers,
   routeObstacles,
 } from "./entity-traits";
@@ -39,6 +40,19 @@ export const FAILURE_OUTCOMES: readonly InteractionOutcome[] = [
   "splash",
   "blocked",
   "scared",
+];
+
+/**
+ * What can happen in free play (a character but no goal). Crossing and the
+ * funny misses need a route to cross or fall short of, so without a goal
+ * they never fit, even when something that blocks is in the picture: there
+ * is nowhere to get past it to. A new drawing can still scare, shelter or
+ * simply delight the character.
+ */
+export const FREE_PLAY_OUTCOMES: readonly InteractionOutcome[] = [
+  "nothing_happens",
+  "scared",
+  "sheltered",
 ];
 
 export function opensRoute(outcome: InteractionOutcome): boolean {
@@ -81,11 +95,13 @@ export function interactionProblem(
   const actor = world.entities.find((entity) => entity.id === entityId);
   if (!actor) return "That drawing is not in this world.";
   const character = storyCharacter(world);
-  const hasGoal =
-    !!world.goal &&
-    world.entities.some((entity) => entity.id === world.goal?.characterId) &&
-    world.entities.some((entity) => entity.id === world.goal?.targetId);
-  if (actor.id === world.goal?.characterId || actor.id === world.goal?.targetId)
+  // Without a goal (free play) only FREE_PLAY_OUTCOMES can fit.
+  const hasGoal = hasReachableGoal(world);
+  if (
+    actor.id === character?.id ||
+    actor.id === world.goal?.characterId ||
+    actor.id === world.goal?.targetId
+  )
     return "The character and its goal cannot resolve an interaction.";
   // Something that itself closes the route cannot carry anyone past it (a
   // river never crosses itself); it can still fail, scare or just be there.
@@ -204,8 +220,11 @@ export const interactionResponseSchema = z
   .object({
     mode: z.literal("live"),
     outcome: interactionOutcomeSchema,
-    /** How likely the drawing gets the character to the goal (Jev Score). */
-    odds: z.number().min(0).max(1),
+    /**
+     * How likely the drawing gets the character to the goal (Jev Score).
+     * Null in free play: with no goal the question is not asked.
+     */
+    odds: z.number().min(0).max(1).nullable(),
     /** Jev's confidence in the outcome choice. */
     confidence: z.number().min(0).max(1),
     /** The new drawing. */
@@ -215,7 +234,23 @@ export const interactionResponseSchema = z
     /** The route obstacle the outcome is about, if any. */
     obstacleId: entityIdSchema.nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((response, ctx) => {
+    // Free play has no route, so no obstacle and no route outcome.
+    if (response.odds !== null) return;
+    if (response.obstacleId !== null)
+      ctx.addIssue({
+        code: "custom",
+        path: ["obstacleId"],
+        message: "Free play has no route obstacle.",
+      });
+    if (!FREE_PLAY_OUTCOMES.includes(response.outcome))
+      ctx.addIssue({
+        code: "custom",
+        path: ["outcome"],
+        message: "Free play has no route to cross or miss.",
+      });
+  });
 
 export type InteractionRequest = z.infer<typeof interactionRequestSchema>;
 export type InteractionResponse = z.infer<typeof interactionResponseSchema>;

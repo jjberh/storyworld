@@ -6,6 +6,20 @@ import { storyCharacter } from "./interaction";
 type Beat = Omit<StoryBeat, "id">;
 
 /**
+ * Whether the character can walk over to `thing` in free play: its middle is
+ * within a band of the character's, so nobody walks up into the sky to a sun
+ * or a cloud.
+ */
+export function withinWalk(
+  character: Pick<Entity, "bounds">,
+  thing: Pick<Entity, "bounds">,
+): boolean {
+  const middle = (entity: Pick<Entity, "bounds">) =>
+    entity.bounds.y + entity.bounds.height / 2;
+  return Math.abs(middle(thing) - middle(character)) <= 150;
+}
+
+/**
  * The interaction this world committed at its own revision, if any. A
  * restored or later world still carries its last interaction, but only the
  * event that resolved it presents it.
@@ -243,10 +257,112 @@ export function interactionBeats(
       break;
     }
     case "nothing_happens":
-      beats = react("surprised", `${name} spots ${actor.name} and smiles.`);
+      // In free play there is no goal to head for, so the character goes to
+      // play with the new drawing instead.
+      beats =
+        world.pathStatus === "free_play" && character
+          ? [
+              ...react("happy", `${name} spots ${actor.name} and smiles.`),
+              ...(withinWalk(character, actor)
+                ? [
+                    {
+                      narration: `${name} skips over to ${actor.name}.`,
+                      mood: "delighted" as const,
+                      action: {
+                        type: "move_toward" as const,
+                        entityId: character.id,
+                        targetId: actor.id,
+                      },
+                    },
+                  ]
+                : []),
+              {
+                narration: withinWalk(character, actor)
+                  ? `${name} and ${actor.name} play together!`
+                  : `${name} waves hello to ${actor.name}!`,
+                mood: "delighted",
+                action: { type: "celebrate", entityId: character.id },
+              },
+            ]
+          : react("surprised", `${name} spots ${actor.name} and smiles.`);
       break;
   }
   if (beats.length === 0)
     beats = [focusActor(`${actor.name} joins the picture.`)];
   return beats.slice(0, 3);
+}
+
+/**
+ * A free-play opening: there is no goal to head for, so the character steps
+ * into the story and wanders over to the nearest friendly thing on its
+ * ground (never into something that blocks or scares), if there is one.
+ * Empty without a character.
+ */
+export function freePlayOpeningBeats(
+  world: WorldState,
+  openingNarration?: string,
+): Beat[] {
+  const character = storyCharacter(world);
+  if (!character) return [];
+  const middle = (entity: Entity) => ({
+    x: entity.bounds.x + entity.bounds.width / 2,
+    y: entity.bounds.y + entity.bounds.height / 2,
+  });
+  const from = middle(character);
+  const distance = (entity: Entity) =>
+    Math.hypot(middle(entity).x - from.x, middle(entity).y - from.y);
+  const friend = world.entities
+    .filter(
+      (entity) =>
+        entity.id !== character.id &&
+        !has(entity, "blocks") &&
+        !has(entity, "scares") &&
+        withinWalk(character, entity),
+    )
+    .sort((a, b) => distance(a) - distance(b))[0];
+  return [
+    {
+      narration:
+        openingNarration?.trim().slice(0, 240) ||
+        `${character.name} steps into the story.`,
+      mood: "curious",
+      action: { type: "focus", entityId: character.id },
+    },
+    ...(friend
+      ? [
+          {
+            narration: `${character.name} wanders over to ${friend.name}.`,
+            mood: "delighted" as const,
+            action: {
+              type: "move_toward" as const,
+              entityId: character.id,
+              targetId: friend.id,
+            },
+          },
+        ]
+      : []),
+  ];
+}
+
+/**
+ * In free play, the character notices something new in the picture. Nothing
+ * when there is no character or the new thing is the character.
+ */
+export function freePlaySpotBeat(
+  world: WorldState,
+  thing: Entity,
+): Beat | undefined {
+  const character = storyCharacter(world);
+  return character && character.id !== thing.id
+    ? {
+        narration: `${character.name} spots ${thing.name}!`,
+        mood: "curious",
+        action: {
+          type: "react",
+          entityId: character.id,
+          causeId: thing.id,
+          reaction: "surprised",
+        },
+      }
+    : undefined;
 }

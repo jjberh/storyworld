@@ -103,7 +103,8 @@ export const interactionSchema = z
   .object({
     entityId: entityIdSchema,
     outcome: interactionOutcomeSchema,
-    odds: probabilitySchema,
+    // Null in free play (no goal, so Jev's odds question is not asked).
+    odds: probabilitySchema.nullable(),
     confidence: probabilitySchema,
     obstacleId: entityIdSchema.nullable(),
     revision: z.number().int().min(0),
@@ -141,7 +142,8 @@ export const operationSchema = z.discriminatedUnion("type", [
       type: z.literal("RESOLVE_INTERACTION"),
       entityId: entityIdSchema,
       outcome: interactionOutcomeSchema,
-      odds: probabilitySchema,
+      // Null exactly when the world has no goal; the reducer checks which.
+      odds: probabilitySchema.nullable(),
       confidence: probabilitySchema,
       obstacleId: entityIdSchema.nullable(),
     })
@@ -162,7 +164,7 @@ export const worldStateSchema = z
       })
       .strict()
       .nullable(),
-    pathStatus: z.enum(["idle", "blocked", "available"]),
+    pathStatus: z.enum(["idle", "free_play", "blocked", "available"]),
     weather: z.enum(["clear", "rain"]),
     interaction: interactionSchema.nullable(),
     crossings: z.array(routeCrossingSchema).max(100),
