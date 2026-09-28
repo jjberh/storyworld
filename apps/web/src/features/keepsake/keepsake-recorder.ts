@@ -1,5 +1,6 @@
 import type { ConfirmedScene } from "@storyworld/contracts";
 import { StoryStageRenderer } from "../world-renderer/story-stage-renderer";
+import { KEEPSAKE_INTRO } from "../world-renderer/intro-motion";
 import {
   keepsakeSupport,
   movieFilename,
@@ -212,7 +213,10 @@ export async function recordKeepsake(
       switch (step.kind) {
         case "intro":
           renderer.setWorld(step.world);
-          return renderer.playIntro(run.signal, { caption: step.caption });
+          return renderer.playIntro(run.signal, {
+            timing: KEEPSAKE_INTRO,
+            caption: step.caption,
+          });
         case "play":
           renderer.setWorld(step.before);
           return renderer.playSequence(step.sequence, run.signal, step.world);

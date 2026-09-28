@@ -16,19 +16,21 @@ import {
   type StageSnapshot,
 } from "./story-stage-renderer";
 import { center, logicalX } from "./story-playback";
+import { RevealHandoff } from "./reveal-handoff";
 
-function restingSnapshot(world: WorldState): StageSnapshot {
+function restingSnapshot(world: WorldState, reveal: boolean): StageSnapshot {
   return {
     caption: INITIAL_CAPTION,
     action: "resting",
     celebrating: false,
     imageStatus: "loading",
     canvasFailed: false,
+    intro: reveal ? "playing" : "done",
     entities: world.entities.map((entity) => ({
       id: entity.id,
       name: entity.name,
       role: entity.role,
-      revealState: "visible",
+      revealState: reveal ? "flat" : "visible",
       placement: "source",
       logicalX: logicalX(entity, undefined),
       centerX: Math.round(center(entity.bounds).x),
@@ -42,18 +44,29 @@ function restingSnapshot(world: WorldState): StageSnapshot {
 /**
  * Thin React host for `StoryStageRenderer`. The canvas draws the theater; the
  * DOM around it mirrors the renderer's semantic state for assistive tech and
- * tests (caption, action, and one element per piece).
+ * tests (caption, action, reveal state, and one element per piece).
+ *
+ * `reveal` plays the live lift-off reveal (`LIVE_INTRO`) when the stage first
+ * opens, calling `onRevealStarted` as it starts; the first story sequence
+ * waits for it. The value on mount counts: a stage mounted later with
+ * `reveal` still true would replay it, so the host clears it on start.
+ * Pieces added later get their own short lift-off. Both are presentation
+ * only.
  */
 export function StoryStage({
   scene,
   world,
   sequence,
   keepCommittedRevealsVisible = false,
+  reveal = false,
+  onRevealStarted,
 }: {
   scene: ConfirmedScene;
   world: WorldState;
   sequence: StorySequence | null;
   keepCommittedRevealsVisible?: boolean;
+  reveal?: boolean;
+  onRevealStarted?: () => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [renderer, setRenderer] = useState<StoryStageRenderer | null>(null);
@@ -63,10 +76,15 @@ export function StoryStage({
   // Handed from a torn-down stage to its replacement so a rebuild keeps the
   // pieces where they stood and does not replay the event again.
   const carried = useRef<StageRestingState | undefined>(undefined);
+  // The reveal passes from renderer to renderer until one finishes it
+  // (StrictMode mounts twice); after that a rebuild keeps the pieces standing.
+  const [handoff] = useState(() => new RevealHandoff(reveal));
+  const latestOnRevealStarted = useRef(onRevealStarted);
   useEffect(() => {
     latestScene.current = scene;
     latestWorld.current = world;
     latestSequence.current = sequence;
+    latestOnRevealStarted.current = onRevealStarted;
   });
 
   // Live snapshots re-parse the scene on every update, so the renderer is
@@ -82,9 +100,13 @@ export function StoryStage({
       world: latestWorld.current,
       keepCommittedRevealsVisible,
       interactive: true,
+      liftNewPieces: true,
       resting: carried.current,
       width: element.clientWidth || undefined,
     });
+    const stopReveal = handoff.play(stage, () =>
+      latestOnRevealStarted.current?.(),
+    );
     stage.canvas.className = "story-stage-canvas";
     stage.canvas.setAttribute("aria-hidden", "true");
     element.appendChild(stage.canvas);
@@ -94,12 +116,13 @@ export function StoryStage({
     observer.observe(element);
     setRenderer(stage);
     return () => {
+      stopReveal();
       observer.disconnect();
       carried.current = stage.restingState();
       stage.destroy();
       setRenderer((current) => (current === stage ? null : current));
     };
-  }, [drawing, sceneObjectIds, keepCommittedRevealsVisible]);
+  }, [drawing, sceneObjectIds, keepCommittedRevealsVisible, handoff]);
 
   useEffect(() => {
     renderer?.setWorld(world);
@@ -127,7 +150,10 @@ export function StoryStage({
     void renderer.playSequence(latestSequence.current, playback.current.signal);
   }, [renderer, sourceEventId]);
 
-  const fallback = useMemo(() => restingSnapshot(world), [world]);
+  const fallback = useMemo(
+    () => restingSnapshot(world, handoff.pending),
+    [world, handoff, renderer],
+  );
   const subscribe = useCallback(
     (listener: () => void) =>
       renderer ? renderer.subscribe(listener) : () => undefined,
@@ -163,6 +189,8 @@ export function StoryStage({
         role="img"
         aria-label={`Living paper theater. The route is ${world.pathStatus}.`}
         data-action={snapshot.action}
+        data-intro={snapshot.intro}
+        data-motion={renderer?.reducedMotion ? "reduced" : "full"}
       >
         <div ref={host} className="story-stage-host" />
         <img
@@ -207,7 +235,8 @@ export function StoryStage({
             <button
               type="button"
               data-tickle={entity.id}
-              disabled={entity.revealState === "hidden"}
+              // A piece reacts once it is showing and has landed.
+              disabled={entity.revealState !== "visible"}
               onClick={() => renderer?.react(entity.id)}
             >
               Tickle {entity.name}

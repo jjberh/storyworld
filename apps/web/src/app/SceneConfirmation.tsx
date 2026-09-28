@@ -273,7 +273,8 @@ export function SceneConfirmation({
         throw new Error("Your story is taking a moment. Try again safely.");
       const roomMode: RoomMode =
         worldClient.getSnapshot().mode === "live" ? "live" : "fixture";
-      holdWorldClient(attempt.id, worldClient);
+      // The room opens with the lift-off reveal, once (see world-session).
+      holdWorldClient(attempt.id, worldClient, { reveal: true });
       enterWorldRoom(attempt.id, roomMode);
       dispatch({ type: "committed" });
       onWorldReady(attempt.id, roomMode);

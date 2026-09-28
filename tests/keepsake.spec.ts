@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
-import { drawOnStory, mockEdit, mockJev } from "./story-mocks";
+import { drawOnStory, mockEdit, mockJev, waitForReveal } from "./story-mocks";
 
 const response = {
   mode: "live",
@@ -54,6 +54,7 @@ async function startRoom(page: Page) {
   await expect(
     page.getByRole("heading", { name: "Your Story Room" }),
   ).toBeVisible();
+  await waitForReveal(page);
 }
 
 type StageTrace = { captions: string[]; actions: string[] };

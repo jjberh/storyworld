@@ -5,7 +5,12 @@ import type {
   WorldClient,
 } from "@storyworld/contracts/model";
 import { LiveWorldClient } from "../services/world-client";
-import { peekWorldClient, type RoomMode } from "../services/world-session";
+import {
+  markRoomRevealed,
+  peekWorldClient,
+  roomOwesReveal,
+  type RoomMode,
+} from "../services/world-session";
 import paintbrushIcon from "../assets/figma/paintbrush.svg";
 import type { StorySequence } from "@storyworld/contracts/story-beat";
 import { StoryStage } from "../features/world-renderer/StoryStage";
@@ -65,6 +70,10 @@ export function StoryRoom({ worldId }: { worldId: string }) {
   const requestedGuest = location.pathname.startsWith("/join");
   const mode = roomMode();
   const [session] = useState(() => openRoomClient(worldId));
+  // The lift-off reveal, owed only right after "Start my story". Cleared the
+  // moment a stage starts it, so a stage mounted later (for example after
+  // the world briefly went away) shows the pieces standing instead.
+  const [reveal, setReveal] = useState(() => roomOwesReveal(worldId));
   const client = session.client;
   const snapshot = useSyncExternalStore(
     client?.subscribe ?? ignoreSubscribe,
@@ -251,6 +260,11 @@ export function StoryRoom({ worldId }: { worldId: string }) {
                   world={world}
                   sequence={directedStory.sequence}
                   keepCommittedRevealsVisible
+                  reveal={reveal}
+                  onRevealStarted={() => {
+                    markRoomRevealed(worldId);
+                    setReveal(false);
+                  }}
                 />
               ) : (
                 <div

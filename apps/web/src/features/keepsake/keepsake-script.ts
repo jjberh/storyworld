@@ -3,7 +3,10 @@ import type {
   StoryAction,
   StorySequence,
 } from "@storyworld/contracts/story-beat";
-import { introDurationMs } from "../world-renderer/intro-motion";
+import {
+  introDurationMs,
+  KEEPSAKE_INTRO,
+} from "../world-renderer/intro-motion";
 import { beatHoldMs } from "../world-renderer/story-playback";
 import type { StageTitleCard } from "../world-renderer/story-stage-renderer";
 
@@ -250,7 +253,7 @@ export function buildKeepsakeScript(
   const played = sequences.get(first.id);
   let opening = played && openingAfterIntro(played);
 
-  const introMs = introDurationMs(first.state.entities.length);
+  const introMs = introDurationMs(first.state.entities.length, KEEPSAKE_INTRO);
   const budgetMs = PLANNED_MAX_MS - introMs - END_CARD_MS;
   const plays = () =>
     [opening, moment].filter((item): item is StorySequence => !!item);

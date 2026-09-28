@@ -3,6 +3,19 @@ import { expect, type Page } from "@playwright/test";
 type Entity = { id: string; properties: string[] };
 
 /**
+ * Waits for the Story Room's lift-off reveal (about 3 to 4 s after "Start my
+ * story") to finish, so the pieces have landed and the opening sequence may
+ * play.
+ */
+export async function waitForReveal(page: Page) {
+  await expect(page.locator(".paper-theater-stage")).toHaveAttribute(
+    "data-intro",
+    "done",
+    { timeout: 10_000 },
+  );
+}
+
+/**
  * Stands in for Jev: answers POST /api/interactions with `outcome` (or the
  * outcome `pick` chooses for the new drawing) for whatever drawing the page
  * asks about. Returns the entity IDs it was asked about.

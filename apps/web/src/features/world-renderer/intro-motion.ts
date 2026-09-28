@@ -1,20 +1,67 @@
+import type { Entity } from "@storyworld/contracts/model";
 import { RESTING_POSE, type Pose } from "./stage-motion";
 
 // The "lift off the paper" reveal: the child's drawing sits flat on the
-// paper, then each piece peels up, rises with a small shake, and settles into
-// its idle loop. Pure functions of time so the keepsake movie (and later the
-// live reveal) can replay it exactly.
+// paper, then the pieces peel up together (a small stagger apart), rise with
+// a small shake, and settle into their idle loops. Nothing is saved for last
+// and nothing waves at the end. Pure functions of time so the live Story Room
+// and the keepsake movie can replay it exactly.
 
-/** The flat drawing shows alone for this long before anything lifts. */
-export const INTRO_LEAD_MS = 500;
-/** How long one piece takes to lift, shake and land. */
-export const INTRO_LIFT_MS = 1000;
-/** Quiet time after the last piece lands. */
-export const INTRO_SETTLE_MS = 450;
-/** Gap between one piece starting to lift and the next. */
-export const INTRO_STAGGER_MS = 220;
-/** The stagger shrinks for busy drawings so the intro stays short. */
-export const INTRO_MAX_STAGGER_TOTAL_MS = 1300;
+/** The shape of one lift-off: how long each part takes. */
+export type IntroTiming = {
+  /** The flat drawing shows alone for this long before anything lifts. */
+  leadMs: number;
+  /** How long one piece takes to lift, shake and land. */
+  liftMs: number;
+  /** Quiet time after the last piece lands. */
+  settleMs: number;
+  /** Gap between one piece starting to lift and the next. */
+  staggerMs: number;
+  /** The stagger shrinks for busy drawings so the whole reveal stays short. */
+  maxStaggerTotalMs: number;
+  /**
+   * Pieces fade in over the flat drawing as they peel up. Off when the piece
+   * is already showing, e.g. a new drawing whose paper cutout hands over.
+   */
+  fadeIn: boolean;
+};
+
+/**
+ * The live reveal when the Story Room first opens: about 3 s for a small
+ * scene, never more than 3.7 s for a busy one (the plan asks for 3 to 5 s).
+ */
+export const LIVE_INTRO: IntroTiming = {
+  leadMs: 1000,
+  liftMs: 1600,
+  settleMs: 400,
+  staggerMs: 120,
+  maxStaggerTotalMs: 700,
+  fadeIn: true,
+};
+
+/** The movie's tighter reveal, so the whole keepsake fits in 10–15 s. */
+export const KEEPSAKE_INTRO: IntroTiming = {
+  leadMs: 500,
+  liftMs: 1000,
+  settleMs: 450,
+  staggerMs: 220,
+  maxStaggerTotalMs: 1300,
+  fadeIn: true,
+};
+
+/**
+ * A new mid-story drawing's own short lift-off once it is committed: its
+ * cutout is already on the paper, so it rises and lands straight away.
+ */
+export const DRAWING_LIFT: IntroTiming = {
+  leadMs: 0,
+  liftMs: 900,
+  settleMs: 0,
+  staggerMs: 0,
+  maxStaggerTotalMs: 0,
+  fadeIn: false,
+};
+
 /** Backdrop alpha once the pieces have lifted (matches the resting stage). */
 export const RESTING_BACKDROP_ALPHA = 0.42;
 
@@ -37,39 +84,67 @@ function smoothstep(value: number) {
   return t * t * (3 - 2 * t);
 }
 
-function staggerMs(count: number) {
+function staggerMs(count: number, timing: IntroTiming) {
   if (count <= 1) return 0;
-  return Math.min(INTRO_STAGGER_MS, INTRO_MAX_STAGGER_TOTAL_MS / (count - 1));
+  return Math.min(timing.staggerMs, timing.maxStaggerTotalMs / (count - 1));
+}
+
+/**
+ * The order pieces lift in: left to right across the paper (top to bottom
+ * for pieces in line), whatever they are. The hero is not saved for last.
+ */
+export function liftOrder(
+  entities: readonly Pick<Entity, "id" | "bounds">[],
+): string[] {
+  const middle = (entity: Pick<Entity, "bounds">) => ({
+    x: entity.bounds.x + entity.bounds.width / 2,
+    y: entity.bounds.y + entity.bounds.height / 2,
+  });
+  return [...entities]
+    .sort((a, b) => middle(a).x - middle(b).x || middle(a).y - middle(b).y)
+    .map((entity) => entity.id);
 }
 
 /** When piece `index` of `count` starts lifting, in ms from the intro start. */
-export function introPieceStartMs(index: number, count: number) {
-  return INTRO_LEAD_MS + staggerMs(count) * index;
+export function introPieceStartMs(
+  index: number,
+  count: number,
+  timing: IntroTiming,
+) {
+  return timing.leadMs + staggerMs(count, timing) * index;
 }
 
 /** Total intro length for `count` pieces (the gentle intro is the same). */
-export function introDurationMs(count: number) {
+export function introDurationMs(count: number, timing: IntroTiming) {
   return (
-    introPieceStartMs(Math.max(0, count - 1), count) +
-    INTRO_LIFT_MS +
-    INTRO_SETTLE_MS
+    introPieceStartMs(Math.max(0, count - 1), count, timing) +
+    timing.liftMs +
+    timing.settleMs
   );
 }
 
 /**
- * One piece `elapsedMs` into the intro. Before its turn the piece is fully
- * transparent, so the backdrop drawing underneath shows in its place. The
- * gentle variant (reduced motion) only fades the piece in: no rise or shake.
+ * One piece `elapsedMs` into the intro. Before its turn a fading piece is
+ * fully transparent, so the backdrop drawing underneath shows in its place.
+ * The gentle variant (reduced motion) only fades the piece in: no rise or
+ * shake.
  */
 export function sampleIntro(
   elapsedMs: number,
   index: number,
   count: number,
   gentle: boolean,
+  timing: IntroTiming,
 ): IntroSample {
-  const t = (elapsedMs - introPieceStartMs(index, count)) / INTRO_LIFT_MS;
+  const t =
+    (elapsedMs - introPieceStartMs(index, count, timing)) / timing.liftMs;
   if (t >= 1) return { pose: RESTING_POSE, alpha: 1, idle: 1 };
-  if (t <= 0) return { pose: RESTING_POSE, alpha: 0, idle: 0 };
+  if (t <= 0)
+    return {
+      pose: RESTING_POSE,
+      alpha: gentle || timing.fadeIn ? 0 : 1,
+      idle: 0,
+    };
   if (gentle) return { pose: RESTING_POSE, alpha: smoothstep(t), idle: 1 };
 
   // Peel up quickly, hang in the air with a little shake, then land.
@@ -85,7 +160,7 @@ export function sampleIntro(
       scaleY: 1 + 0.07 * rise,
       rotation: 0.05 * shake * damping,
     },
-    alpha: smoothstep(t / 0.12),
+    alpha: timing.fadeIn ? smoothstep(t / 0.12) : 1,
     idle: smoothstep((t - 0.7) / 0.3),
   };
 }
@@ -94,9 +169,14 @@ export function sampleIntro(
  * The drawing starts at full strength and fades back to the resting stage as
  * the pieces lift; the paper mattes (the "holes" the pieces leave) fade in.
  */
-export function introBackdrop(elapsedMs: number, count: number): IntroBackdrop {
-  const first = introPieceStartMs(0, count);
-  const last = introPieceStartMs(Math.max(0, count - 1), count) + INTRO_LIFT_MS;
+export function introBackdrop(
+  elapsedMs: number,
+  count: number,
+  timing: IntroTiming,
+): IntroBackdrop {
+  const first = introPieceStartMs(0, count, timing);
+  const last =
+    introPieceStartMs(Math.max(0, count - 1), count, timing) + timing.liftMs;
   const progress = smoothstep((elapsedMs - first) / Math.max(1, last - first));
   return {
     backdropAlpha:

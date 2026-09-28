@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { drawOnStory, mockEdit, mockJev } from "./story-mocks";
+import { drawOnStory, mockEdit, mockJev, waitForReveal } from "./story-mocks";
 
 const response = {
   mode: "live",
@@ -60,6 +60,7 @@ async function startRoom(page: Page) {
   await expect(page.getByTestId("room-presence")).toContainText(
     "You · director",
   );
+  await waitForReveal(page);
 }
 
 test("Story Room plays a fresh server-directed sequence", async ({ page }) => {
@@ -502,14 +503,19 @@ async function entityPoint(page: Page, id: string) {
   };
 }
 
+/**
+ * Waits until the opening has played: the reveal is done, the opening moved
+ * Fox to the riverbank, and the stage has come to rest after it.
+ */
 async function waitForRest(page: Page) {
-  await expect(page.locator(".paper-theater-stage")).toHaveAttribute(
-    "data-action",
-    "resting",
-  );
+  await waitForReveal(page);
   await expect(page.locator('[data-entity-id="fox"]')).toHaveAttribute(
     "data-placement",
     "near-obstacle",
+  );
+  await expect(page.locator(".paper-theater-stage")).toHaveAttribute(
+    "data-action",
+    "resting",
   );
 }
 
