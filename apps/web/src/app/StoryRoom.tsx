@@ -1,5 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { cloudOperation } from "@storyworld/world-fixtures";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type {
   ClientSnapshot,
   RoomParticipant,
@@ -11,8 +10,9 @@ import paintbrushIcon from "../assets/figma/paintbrush.svg";
 import type { StorySequence } from "@storyworld/contracts/story-beat";
 import { StoryStage } from "../features/world-renderer/StoryStage";
 import { KeepsakeButton } from "../features/keepsake/KeepsakeButton";
-import { bridgeOperationForWorld } from "./story-room-operations";
+import { DrawingCanvas } from "../features/canvas/DrawingCanvas";
 import { useDirectedStorySequence } from "./use-directed-story-sequence";
+import { useStoryDrawing } from "./use-story-drawing";
 
 const emptySnapshot: ClientSnapshot = {
   status: "ready",
@@ -74,9 +74,12 @@ export function StoryRoom({ worldId }: { worldId: string }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState(
     requestedGuest
-      ? "Join this room to add an idea."
-      : "This room is the committed story.",
+      ? "Draw something new on the story to suggest it to the director."
+      : "Draw something new on the story and see what happens.",
   );
+  const [drawMode, setDrawMode] = useState(false);
+  const paper = useRef<HTMLDivElement>(null);
+  const [paperWidth, setPaperWidth] = useState(1000);
 
   useEffect(() => {
     if (!client) return;
@@ -111,6 +114,19 @@ export function StoryRoom({ worldId }: { worldId: string }) {
     previousEvent,
     scene,
   );
+  const drawing = useStoryDrawing({ client, scene, contributor });
+  const lastStrokes = useRef<number[][]>([]);
+  const hasWorld = !!world;
+  useEffect(() => {
+    const element = paper.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width > 0)
+        setPaperWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasWorld]);
 
   // Every sequence this room has played, by committed event ID, so the
   // keepsake movie can replay them. Presentation history only: the world
@@ -209,6 +225,17 @@ export function StoryRoom({ worldId }: { worldId: string }) {
               </p>
             </div>
             <div className="canvas-tools">
+              <button
+                className="tool-chip"
+                aria-pressed={drawMode}
+                onClick={() => {
+                  if (drawMode) drawing.finish();
+                  setDrawMode(!drawMode);
+                }}
+              >
+                <img src={paintbrushIcon} alt="" />
+                {drawMode ? "Done drawing" : "Draw something new"}
+              </button>
               <span className="world-status">
                 {world.pathStatus === "available"
                   ? "Route opened"
@@ -217,7 +244,7 @@ export function StoryRoom({ worldId }: { worldId: string }) {
                     : "No route yet"}
               </span>
             </div>
-            <div className="paper room-paper">
+            <div className="paper room-paper" ref={paper}>
               {scene ? (
                 <StoryStage
                   scene={scene}
@@ -234,7 +261,67 @@ export function StoryRoom({ worldId }: { worldId: string }) {
                   The confirmed picture will appear here.
                 </div>
               )}
+              <div className="pending-cutouts" aria-hidden="true">
+                {drawing.pending.map((cutout) => (
+                  <img
+                    key={cutout.id}
+                    className="pending-cutout"
+                    data-testid="pending-cutout"
+                    data-state={cutout.state}
+                    src={cutout.image}
+                    alt=""
+                    style={{
+                      left: cutout.bounds.x / 10 + "%",
+                      top: cutout.bounds.y / 6 + "%",
+                      width: cutout.bounds.width / 10 + "%",
+                      height: cutout.bounds.height / 6 + "%",
+                    }}
+                  />
+                ))}
+              </div>
+              {drawMode && (
+                <div
+                  className="drawing-layer room-drawing-layer"
+                  data-testid="story-drawing-layer"
+                >
+                  <DrawingCanvas
+                    key={drawing.canvasKey}
+                    width={paperWidth}
+                    disabled={false}
+                    onChange={(strokes) => {
+                      lastStrokes.current = strokes.strokes;
+                    }}
+                    onStart={drawing.startStroke}
+                    onCancel={drawing.cancelStroke}
+                    onFinish={() => drawing.addStrokes(lastStrokes.current)}
+                  />
+                </div>
+              )}
             </div>
+            {drawing.note && (
+              <p className="drawing-note" role="status">
+                {drawing.note}
+                {drawing.unresolved && !contributor && (
+                  <button
+                    className="drawing-note-retry"
+                    onClick={() => void drawing.retryInteraction()}
+                  >
+                    Try again
+                  </button>
+                )}
+              </p>
+            )}
+            {drawing.pending
+              .filter((cutout) => cutout.state === "failed")
+              .map((cutout) => (
+                <button
+                  key={cutout.id}
+                  className="retry-drawing"
+                  onClick={() => drawing.retry(cutout.id)}
+                >
+                  Try my drawing again
+                </button>
+              ))}
             {directedStory.status && (
               <p className="director-status" role="status">
                 {directedStory.status}
@@ -289,34 +376,6 @@ export function StoryRoom({ worldId }: { worldId: string }) {
             <div className="proposals-card">
               <h2>The World Listens</h2>
               <p className="card-help">{note}</p>
-              <div className="actions">
-                <button
-                  className="primary-action"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(() =>
-                      contributor
-                        ? client!.propose(bridgeOperationForWorld(world))
-                        : client!.apply(bridgeOperationForWorld(world)),
-                    )
-                  }
-                >
-                  {contributor ? "Propose" : "Add"} sample bridge
-                </button>
-                <button
-                  className="secondary-action"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(() =>
-                      contributor
-                        ? client!.propose(cloudOperation())
-                        : client!.apply(cloudOperation()),
-                    )
-                  }
-                >
-                  {contributor ? "Propose" : "Add"} storm cloud
-                </button>
-              </div>
             </div>
             <div className="moments-card">
               <h2>Story Moments</h2>
@@ -353,7 +412,10 @@ export function StoryRoom({ worldId }: { worldId: string }) {
                         disabled={busy}
                         onClick={() =>
                           void run(() =>
-                            client!.resolveProposal(proposal.id, true),
+                            drawing.acceptProposal(
+                              proposal.id,
+                              proposal.operation,
+                            ),
                           )
                         }
                       >

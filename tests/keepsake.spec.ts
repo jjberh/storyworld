@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
+import { drawOnStory, mockEdit, mockJev } from "./story-mocks";
 
 const response = {
   mode: "live",
@@ -143,10 +144,12 @@ test("Save my movie records a playable keepsake without disturbing the stage", a
   page,
 }) => {
   test.setTimeout(90_000);
+  await mockEdit(page, { name: "Bridge", properties: ["carries"] });
+  await mockJev(page, "crosses");
   await startRoom(page);
   const fox = page.locator('[data-entity-id="fox"]');
   await expect(fox).toHaveAttribute("data-placement", "near-obstacle");
-  await page.getByRole("button", { name: "Add sample bridge" }).click();
+  await drawOnStory(page);
   await expect(page.getByText(/Fox made it across!/)).toBeVisible();
   await expect(fox).toHaveAttribute("data-placement", "target-side");
   await expect(page.locator(".paper-theater-stage")).toHaveAttribute(

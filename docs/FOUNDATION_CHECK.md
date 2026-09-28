@@ -15,9 +15,13 @@ service refreshes the container-only node_modules volume so old images or
 Windows dependencies do not break onboarding.
 
 The deterministic causal demo is retained at
-http://localhost:5173/?mode=fixture&fixture=nova. Click **Add sample bridge**:
-the route opens. Add a storm cloud: rain appears. Reset restores the river
-obstacle.
+http://localhost:5173/?mode=fixture&fixture=nova. Draw a line across the
+river: the fixture reads it as a bridge and adds it. Without
+`JEV_STORYWORLD_KEY` the page says interactions need Jev and the route stays
+blocked; with the key, Jev decides the outcome and a crossing opens the route.
+Pick **Cloud** and draw in the sky: rain appears. Reset restores the river
+obstacle. In Story Room, **Draw something new** does the same on the living
+paper stage.
 
 ## Native
 
@@ -57,7 +61,8 @@ hackathon foundation; rooms separate edits, not confidential data.
 
 ## What is implemented
 
-- Typed world operations, entities with a role and properties (`SCHEMA_VERSION` 2), a geometric rule where anything that `blocks` is spanned by a `helper` that `carries`, rain from anything with `weather`, revisions, idempotency, director authorization, guest proposals, event snapshots, reset and restore.
+- Typed world operations, entities with a role and properties (`SCHEMA_VERSION` 3), routes that open only through a committed Jev interaction outcome (`RESOLVE_INTERACTION`; no rule table, no fixture outcome), rain from anything with `weather`, revisions, idempotency, director authorization, guest proposals, event snapshots, reset and restore.
+- Drawing mid-story in Story Room: a wobbling cutout at once, then Gemini (or the fixture) reads it, it commits with the child's strokes as its cutout, and `/api/interactions` asks Jev what happens. Without `JEV_STORYWORLD_KEY` the drawing is still added and the room says interactions need Jev.
 - React shell, Konva stroke input, Pixi procedural scene, same-origin API proxy, mobile route, fixture/live adapters.
 - The default route starts from a blank canvas or uploaded PNG/JPEG/WebP,
   preserves the source artwork beneath later strokes, and submits the composite
@@ -90,6 +95,7 @@ hackathon foundation; rooms separate edits, not confidential data.
   over. Pending proposals and presence changes do not request or animate.
 - The explicit Nova fixture retains drawing capture, uploaded references,
   ambiguous-interpretation choices, and retry without losing the drawing.
+- Fastify `/api/interactions`: Jev decides what a new drawing does when `JEV_STORYWORLD_KEY` is set (typed errors, never a fallback); `PROVIDER_NOT_CONFIGURED` otherwise.
 - Fastify `/api/interpret/edit`: live Gemini interpretation when `GEMINI_API_KEY` is set (schema-validated, recoverable errors), deterministic fixture otherwise. `/api/interpret/scene` turns an uploaded picture into a proposed initial scene. `/api/story/sequence` validates client-supplied current and previous world snapshots, derives one event delta, and returns one to three presentation beats; it does not independently authenticate database provenance. STT/TTS endpoints return explicit 501 until implemented.
 
 Audio, segmentation, arbitrary pathfinding, QR generation, and finished UX are feature work after this checkpoint. Fixture

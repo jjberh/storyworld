@@ -50,6 +50,8 @@ function state(
     weather: entities.some((entity) => entity.properties.includes("weather"))
       ? "rain"
       : "clear",
+    interaction: null,
+    crossings: [],
   };
 }
 
@@ -144,8 +146,7 @@ describe("sequenceFromCommittedEvents", () => {
     expectValid(sequence);
   });
 
-  it("crosses and celebrates only after a committed bridge opens the route", () => {
-    const before = state(3);
+  it("crosses and celebrates only after a committed outcome opens the route", () => {
     const bridge: Entity = {
       id: "bridge",
       role: "helper",
@@ -154,19 +155,32 @@ describe("sequenceFromCommittedEvents", () => {
       name: "Paper Bridge",
       bounds: { x: 410, y: 320, width: 140, height: 55 },
     };
-    const latest = state(4, [...before.entities, bridge], "available");
+    const before = state(3, [...state(3).entities, bridge]);
+    const latest: WorldState = {
+      ...state(4, before.entities, "available"),
+      interaction: {
+        entityId: "bridge",
+        outcome: "crosses",
+        odds: 0.9,
+        confidence: 0.8,
+        obstacleId: "river",
+        revision: 4,
+      },
+      crossings: [{ obstacleId: "river", helperId: "bridge" }],
+    };
     const sequence = sequenceFor(latest, before);
     expect(sequence?.beats.map((item) => item.action.type)).toEqual([
-      "reveal",
+      "focus",
       "move_toward",
       "celebrate",
     ]);
+    expect(sequence?.beats[0]?.action).toMatchObject({ entityId: "bridge" });
     expect(sequence?.sourceRevision).toBe(4);
     expect(sequence?.sourceEventId).toBe("event-4");
     expectValid(sequence);
   });
 
-  it("reveals a short bridge but keeps the character blocked", () => {
+  it("only reveals a new bridge until its outcome is committed, then keeps a miss blocked", () => {
     const before = state(5);
     const shortBridge: Entity = {
       id: "short-bridge",
@@ -176,10 +190,24 @@ describe("sequenceFromCommittedEvents", () => {
       name: "Short Bridge",
       bounds: { x: 440, y: 320, width: 40, height: 55 },
     };
-    const latest = state(6, [...before.entities, shortBridge], "blocked");
-    const sequence = sequenceFor(latest, before);
+    const added = state(6, [...before.entities, shortBridge], "blocked");
+    const revealed = sequenceFor(added, before);
+    expect(revealed?.beats.map((item) => item.action.type)).toEqual(["reveal"]);
+    expectValid(revealed);
+    const missed: WorldState = {
+      ...state(7, added.entities, "blocked"),
+      interaction: {
+        entityId: "short-bridge",
+        outcome: "almost",
+        odds: 0.3,
+        confidence: 0.7,
+        obstacleId: "river",
+        revision: 7,
+      },
+    };
+    const sequence = sequenceFor(missed, added);
     expect(sequence?.beats.map((item) => item.action.type)).toEqual([
-      "reveal",
+      "focus",
       "blocked_by",
     ]);
     expectValid(sequence);

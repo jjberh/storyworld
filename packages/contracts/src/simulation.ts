@@ -3,13 +3,15 @@ import {
   type WorldState,
   type WorldOperation,
   type Entity,
+  type InteractionOutcome,
 } from "./model";
+import { blockingObstacle, makesRain, routeBlockers } from "./entity-traits";
 import {
-  blockingObstacle,
-  isSpanner,
-  makesRain,
-  routeBlockers,
-} from "./entity-traits";
+  interactionObstacle,
+  interactionProblem,
+  opensRoute,
+  removalProblem,
+} from "./interaction";
 export function initialWorld(id: string): WorldState {
   return {
     id,
@@ -52,6 +54,8 @@ export function initialWorld(id: string): WorldState {
     goal: { characterId: "nova", targetId: "castle" },
     pathStatus: "blocked",
     weather: "clear",
+    interaction: null,
+    crossings: [],
   };
 }
 function validateEntity(e: Entity) {
@@ -69,6 +73,11 @@ function validateEntity(e: Entity) {
   )
     throw new Error("Draw inside the world.");
 }
+/**
+ * Route and weather from committed facts: the route is open once every
+ * obstacle across it has a committed crossing (see RESOLVE_INTERACTION), and
+ * anything with `weather` brings rain.
+ */
 export function deriveWorld(state: WorldState): WorldState {
   const character = state.entities.find(
     (e) => e.id === state.goal?.characterId,
@@ -93,19 +102,24 @@ export function applyOperation(
     ...state,
     entities: [...state.entities],
     rules: [...state.rules],
+    crossings: [...state.crossings],
     revision: state.revision + 1,
   };
   switch (op.type) {
     case "CREATE_ENTITY":
       validateEntity(op.entity);
+      if (op.entity.outcome)
+        throw new Error("A new drawing cannot arrive with an outcome.");
       if (state.entities.length >= 100) throw new Error("This world is full.");
       if (state.entities.some((e) => e.id === op.entity.id))
         throw new Error("That entity already exists.");
       next.entities.push(op.entity);
       break;
-    case "REMOVE_ENTITY":
+    case "REMOVE_ENTITY": {
       if (!state.entities.some((e) => e.id === op.entityId))
         throw new Error("Entity no longer exists.");
+      const problem = removalProblem(state, op.entityId);
+      if (problem) throw new Error(problem);
       next.entities = next.entities.filter((e) => e.id !== op.entityId);
       next.rules = next.rules.filter(
         (r) => r.subjectId !== op.entityId && r.objectId !== op.entityId,
@@ -115,7 +129,19 @@ export function applyOperation(
         next.goal?.targetId === op.entityId
       )
         next.goal = null;
+      // A removed helper no longer holds its crossing open.
+      next.crossings = next.crossings.filter(
+        (crossing) =>
+          crossing.helperId !== op.entityId &&
+          crossing.obstacleId !== op.entityId,
+      );
+      if (
+        next.interaction?.entityId === op.entityId ||
+        next.interaction?.obstacleId === op.entityId
+      )
+        next.interaction = null;
       break;
+    }
     case "ADD_RULE":
       if (
         !state.entities.some((e) => e.id === op.rule.subjectId) ||
@@ -136,6 +162,41 @@ export function applyOperation(
         throw new Error("Invalid goal.");
       next.goal = { characterId: op.characterId, targetId: op.targetId };
       break;
+    case "RESOLVE_INTERACTION": {
+      if (
+        ![op.odds, op.confidence].every(
+          (value) => Number.isFinite(value) && value >= 0 && value <= 1,
+        )
+      )
+        throw new Error("Invalid interaction odds.");
+      const problem = interactionProblem(state, op.entityId, op.outcome);
+      if (problem) throw new Error(problem);
+      const actor = state.entities.find((entity) => entity.id === op.entityId)!;
+      if (actor.outcome)
+        throw new Error("That drawing's moment has already happened.");
+      const obstacle = interactionObstacle(state, op.entityId);
+      // Jev judged a particular obstacle; if the route has changed since,
+      // the outcome no longer describes this world.
+      if (op.obstacleId !== (obstacle?.id ?? null))
+        throw new Error("The world changed before this moment could play.");
+      next.entities = next.entities.map((entity) =>
+        entity.id === op.entityId ? { ...entity, outcome: op.outcome } : entity,
+      );
+      next.interaction = {
+        entityId: op.entityId,
+        outcome: op.outcome,
+        odds: op.odds,
+        confidence: op.confidence,
+        obstacleId: obstacle?.id ?? null,
+        revision: next.revision,
+      };
+      // Only a success opens the way, and only past the obstacle still
+      // closing it. Failures and neutral outcomes leave the route as it was.
+      const blocker = blockingObstacle(state, op.entityId);
+      if (opensRoute(op.outcome) && blocker)
+        next.crossings.push({ obstacleId: blocker.id, helperId: op.entityId });
+      break;
+    }
     default: {
       const exhaustive: never = op;
       throw new Error("Unsupported operation: " + String(exhaustive));
@@ -144,24 +205,43 @@ export function applyOperation(
   next = deriveWorld(next);
   return next;
 }
-/** How a new helper left the goal route, naming what still blocks it. */
-function routeNote(state: WorldState) {
-  if (state.pathStatus === "available") return " · route opened";
-  const blocker = blockingObstacle(state);
-  return blocker
-    ? ` · ${blocker.name} still blocks the route`
-    : " · the way is still blocked";
-}
+const outcomeSummaries: Record<InteractionOutcome, string> = {
+  crosses: "a way across",
+  flies_over: "a flight over",
+  rides_across: "a ride across",
+  launched_across: "a launch across",
+  almost: "almost!",
+  splash: "splash!",
+  blocked: "still in the way",
+  scared: "a big scare",
+  sheltered: "a cozy shelter",
+  nothing_happens: "a new friend",
+};
+
 export function summarize(op: WorldOperation, state: WorldState) {
-  if (op.type === "CREATE_ENTITY")
-    return (
-      op.entity.name +
-      " added" +
-      (isSpanner(op.entity) && state.goal ? routeNote(state) : "")
-    );
-  return op.type === "REMOVE_ENTITY"
-    ? "Object removed"
-    : op.type === "ADD_RULE"
-      ? "World rule added"
-      : "Goal updated";
+  switch (op.type) {
+    case "CREATE_ENTITY":
+      return op.entity.name + " added";
+    case "REMOVE_ENTITY":
+      return "Object removed";
+    case "ADD_RULE":
+      return "World rule added";
+    case "SET_GOAL":
+      return "Goal updated";
+    case "RESOLVE_INTERACTION": {
+      const name =
+        state.entities.find((entity) => entity.id === op.entityId)?.name ??
+        "Drawing";
+      const opened =
+        opensRoute(op.outcome) &&
+        state.pathStatus === "available" &&
+        state.crossings.some((crossing) => crossing.helperId === op.entityId);
+      return (
+        name +
+        ": " +
+        outcomeSummaries[op.outcome] +
+        (opened ? " · route opened" : "")
+      );
+    }
+  }
 }

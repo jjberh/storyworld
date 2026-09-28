@@ -14,11 +14,13 @@ import {
 import { operationSchema } from "../../packages/contracts/src/index";
 import { confirmedSceneSchema } from "../../packages/contracts/src/index";
 import { worldFromScene } from "../../packages/contracts/src/scene";
+import { proposalProblem } from "../../packages/contracts/src/interaction";
 import {
   SCHEMA_VERSION,
   type WorldState,
   type Entity,
   type WorldRule,
+  type WorldOperation,
 } from "../../packages/contracts/src/model";
 const db = schema({
   storyDocument: table(
@@ -119,6 +121,14 @@ function requireOwner(ctx: Context, id: string) {
 function load(ctx: Context, id: string): WorldState {
   const w = requireWorld(ctx, id),
     goal = ctx.db.goal.worldId.find(id);
+  // The last interaction and the route's crossings have no table of their
+  // own: `commit` always writes the current revision's event in the same
+  // transaction as the entity rows, so that snapshot is their record (rewind
+  // already restores whole states from it).
+  const current = ctx.db.worldEvent.id.find(id + ":" + w.revision);
+  const committed = current
+    ? (JSON.parse(current.snapshot) as Partial<WorldState>)
+    : undefined;
   return deriveWorld({
     id,
     revision: w.revision,
@@ -134,6 +144,8 @@ function load(ctx: Context, id: string): WorldState {
       : null,
     pathStatus: "idle",
     weather: "clear",
+    interaction: committed?.interaction ?? null,
+    crossings: committed?.crossings ?? [],
   });
 }
 function commit(
@@ -191,6 +203,20 @@ function fresh(
   if (w.revision !== revision)
     throw new SenderError("World changed. Please retry your action.");
   return true;
+}
+/**
+ * Applies a validated operation, reporting a world rule it breaks (a stale
+ * outcome, a blocker that cannot be removed) as the sender's error with its
+ * message, rather than as an internal failure.
+ */
+function applyChecked(state: WorldState, op: WorldOperation) {
+  try {
+    return applyOperation(state, op);
+  } catch (error) {
+    throw new SenderError(
+      error instanceof Error ? error.message : "Invalid world operation.",
+    );
+  }
 }
 function parseOperation(text: string) {
   if (text.length > 10000) throw new SenderError("Operation too large.");
@@ -303,7 +329,7 @@ export const applyOperationCommand = db.reducer(
     if (!fresh(ctx, args.worldId, args.expectedRevision, args.requestId))
       return;
     const op = parseOperation(args.operation);
-    const next = applyOperation(load(ctx, args.worldId), op);
+    const next = applyChecked(load(ctx, args.worldId), op);
     commit(ctx, next, summarize(op, next), args.requestId);
   },
 );
@@ -325,7 +351,9 @@ export const submitProposal = db.reducer(
     )
       throw new SenderError("Too many pending proposals.");
     const op = parseOperation(args.operation);
-    applyOperation(state, op);
+    const problem = proposalProblem(op, state);
+    if (problem) throw new SenderError(problem);
+    applyChecked(state, op);
     ctx.db.proposal.insert({
       id: args.proposalId,
       worldId: args.worldId,
@@ -350,8 +378,11 @@ export const resolveProposal = db.reducer(
     if (!p || p.worldId !== args.worldId || p.status !== "pending")
       throw new SenderError("Proposal no longer pending.");
     if (args.approve) {
-      const op = parseOperation(p.operation),
-        next = applyOperation(load(ctx, args.worldId), op);
+      const op = parseOperation(p.operation);
+      const current = load(ctx, args.worldId);
+      const problem = proposalProblem(op, current);
+      if (problem) throw new SenderError(problem);
+      const next = applyChecked(current, op);
       commit(
         ctx,
         next,

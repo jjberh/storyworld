@@ -1,8 +1,13 @@
 import Fastify from "fastify";
 import { z } from "zod";
+import { registerInteractionRoute } from "./routes/interactions";
 import { registerInterpretRoutes } from "./routes/interpret";
 import { registerStorySequenceRoute } from "./routes/story-sequence";
 import { ApiError } from "./services/errors";
+import {
+  createInteractionResolver,
+  type InteractionResolver,
+} from "./services/interaction";
 import { createInterpreter, type Interpreter } from "./services/interpretation";
 import {
   createStoryDirector,
@@ -12,12 +17,15 @@ import {
 export type AppOptions = {
   interpreter?: Interpreter;
   storyDirector?: StoryDirector;
+  interactionResolver?: InteractionResolver;
 };
 
 export function buildApp(options: AppOptions = {}) {
   // Defaults to the keyless fixture; server.ts injects the env-configured one.
   const interpreter = options.interpreter ?? createInterpreter({});
   const storyDirector = options.storyDirector ?? createStoryDirector({});
+  const interactionResolver =
+    options.interactionResolver ?? createInteractionResolver({});
   const app = Fastify({ bodyLimit: 5_000_000, logger: false });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ApiError)
@@ -55,9 +63,11 @@ export function buildApp(options: AppOptions = {}) {
     service: "storyworld-api",
     providerMode: interpreter.mode,
     storyProviderMode: storyDirector.mode,
+    interactionProviderMode: interactionResolver.mode,
   }));
   registerInterpretRoutes(app, interpreter);
   registerStorySequenceRoute(app, storyDirector);
+  registerInteractionRoute(app, interactionResolver);
   app.get("/api/elevenlabs/scribe-token", async (_request, reply) =>
     reply.status(501).send({
       code: "PROVIDER_NOT_IMPLEMENTED",

@@ -42,6 +42,24 @@ describe("decodeRoom", () => {
     }
   });
 
+  it("decodes each committed snapshot once, and again if it changes", () => {
+    const world = initialWorld("cached-room");
+    const rows = (snapshot: unknown) => ({
+      worldSchemaVersion: SCHEMA_VERSION,
+      events: [{ ...event(snapshot), id: "cached-room:0" }],
+      scene: undefined,
+    });
+    const first = decodeRoom(rows(world));
+    const second = decodeRoom(rows(world));
+    if (!first.ok || !second.ok) throw new Error("expected a room");
+    expect(second.events[0]!.state).toBe(first.events[0]!.state);
+    const changed = decodeRoom(rows({ ...world, weather: "rain" }));
+    if (!changed.ok) throw new Error("expected a room");
+    expect(changed.events[0]!.state.weather).toBe("rain");
+    // A cached ID never hides a snapshot that no longer parses.
+    expect(decodeRoom(rows({ ...world, weather: "snow" })).ok).toBe(false);
+  });
+
   it("refuses a room stamped with an older schema version kindly", () => {
     expect(
       decodeRoom({

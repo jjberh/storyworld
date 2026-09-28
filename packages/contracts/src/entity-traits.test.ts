@@ -10,7 +10,7 @@ import {
   makesRain,
   presetTraits,
   routeBlockers,
-  spans,
+  routeObstacles,
 } from "./entity-traits";
 import type { Entity } from "./model";
 import { initialWorld } from "./simulation";
@@ -29,7 +29,7 @@ describe("entity traits", () => {
     expect(isBlocker({ role: "obstacle", properties: ["scares"] })).toBe(false);
   });
 
-  it("only lets a helper that carries span a blocker", () => {
+  it("only reads a helper that carries as a spanner", () => {
     expect(isSpanner({ role: "helper", properties: ["carries"] })).toBe(true);
     expect(
       isSpanner({ role: "helper", properties: ["flies", "carries"] }),
@@ -174,7 +174,7 @@ describe("the goal route", () => {
     expect(blockingObstacle(world)?.id).toBe("hedge");
   });
 
-  it("drops spanned blockers and has nothing to blame without a goal", () => {
+  it("drops crossed blockers and has nothing to blame without a goal", () => {
     const bridge: Entity = {
       id: "bridge",
       role: "helper",
@@ -183,10 +183,18 @@ describe("the goal route", () => {
       properties: ["carries"],
       bounds: { x: 400, y: 320, width: 160, height: 50 },
     };
-    expect(spans(bridge, base.entities[1]!)).toBe(true);
-    expect(
-      routeBlockers({ ...base, entities: [...base.entities, bridge] }),
-    ).toEqual([]);
+    // A helper drawn across the river does not open it by itself.
+    const drawn = { ...base, entities: [...base.entities, bridge] };
+    expect(routeBlockers(drawn).map((entity) => entity.id)).toEqual(["river"]);
+    const crossed = {
+      ...drawn,
+      crossings: [{ obstacleId: "river", helperId: "bridge" }],
+    };
+    expect(routeBlockers(crossed)).toEqual([]);
+    expect(routeObstacles(crossed).map((entity) => entity.id)).toEqual([
+      "river",
+    ]);
+    expect(blockingObstacle(crossed)).toBeUndefined();
     expect(blockingObstacle({ ...base, goal: null })).toBeUndefined();
   });
 
