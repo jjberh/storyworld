@@ -1,5 +1,6 @@
 import {
   Application,
+  BufferImageSource,
   Container,
   type FederatedPointerEvent,
   Graphics,
@@ -59,6 +60,8 @@ import {
   type ReactionState,
 } from "./touch-reactions";
 import { entityLook, paintLayerFor, type EntityLook } from "./entity-look";
+import { cutoutAtlas, type Cutout, type RgbaImage } from "./cutout-mask";
+import { cutoutFor, readImagePixels, readScale } from "./cutouts";
 
 // The Story Room "paper theater" drawn on one Pixi canvas. Framework-agnostic:
 // it owns its Application, advances every animation from its own ticker clock,
@@ -68,7 +71,16 @@ import { entityLook, paintLayerFor, type EntityLook } from "./entity-look";
 export const STAGE_WIDTH = 1000;
 export const STAGE_HEIGHT = 600;
 
+/** `loaded` once the drawing has loaded and its pieces are cut out. */
 export type StageImageStatus = "loading" | "loaded" | "failed";
+
+/**
+ * How a scene piece is cut from the drawing: `mask` along its strokes (a
+ * sticker), `rect` as the plain rectangle (the cut was refused), `pending`
+ * until the drawing has loaded. `none` for a piece not cut from the drawing
+ * (one sketched later, or when the drawing failed to load).
+ */
+export type StageCutout = "pending" | "mask" | "rect" | "none";
 
 export type StageEntitySnapshot = {
   id: string;
@@ -89,6 +101,7 @@ export type StageEntitySnapshot = {
   reaction: ReactionKind | undefined;
   /** Tap reactions this piece has started. */
   reactionCount: number;
+  cutout: StageCutout;
 };
 
 export type StageSnapshot = {
@@ -159,6 +172,17 @@ export type StoryStageOptions = {
   realTimeClock?: boolean;
 };
 
+/** One piece as last drawn (see `piecePoses`). */
+export type StagePiecePose = {
+  x: number;
+  y: number;
+  scaleX: number;
+  scaleY: number;
+  rotation: number;
+  alpha: number;
+  top: number;
+};
+
 /** A centred paper card drawn over the stage, e.g. a movie's end card. */
 export type StageTitleCard = { title: string; subtitle?: string };
 
@@ -181,6 +205,16 @@ const PAPER = 0xfffaf0;
 const PAPER_EDGE = 0xfffdf5;
 const INK = 0x3a1b6b;
 const REVEAL_FADE_MS = 240;
+/** Cutting pieces yields to the browser after this long, so frames keep up. */
+const CUT_BUDGET_MS = 8;
+/** The paper patch a scene piece leaves behind on the drawing. */
+const MATTE_ALPHA = 0.74;
+/** A piece's soft shadow, as layers: offset down, alpha. */
+const SHADOW_LAYERS = [
+  [6, 0.08],
+  [4, 0.1],
+  [1, 0.14],
+] as const;
 const TITLE_FADE_MS = 450;
 const CAPTION_FONT = "Georgia, 'Times New Roman', serif";
 /** The drawing canvas's crayon, so a sketched piece matches its strokes. */
@@ -213,6 +247,19 @@ type EntityView = {
   moveDurationMs: number;
   hidden: number;
   reactions: ReactionState;
+};
+
+/** A scene piece's cut from the drawing, and its textures once drawn. */
+type PieceArt = {
+  /** The read size and box the cut was made for. */
+  key: string;
+  /** Null: show the plain rectangle. */
+  cutout: Cutout | null;
+  /** Where the padded cutout sits on the stage, in stage units. */
+  rect: { x: number; y: number; width: number; height: number } | null;
+  source?: BufferImageSource;
+  sticker?: Texture;
+  silhouette?: Texture;
 };
 
 type Waiter = { atMs: number; resolve: () => void };
@@ -297,7 +344,15 @@ export class StoryStageRenderer {
   private image: HTMLImageElement | undefined;
   private imageStatus: StageImageStatus = "loading";
   private imageSource: ImageSource | undefined;
+  /** One-off textures this stage owns (the backdrop and rectangle crops). */
   private textures: Texture[] = [];
+  /** Scene pieces' cuts by entity ID. */
+  private readonly art = new Map<string, PieceArt>();
+  /** Cuts replaced or removed, freed once nothing draws them. */
+  private retiredArt: PieceArt[] = [];
+  /** The drawing's pixels while pieces are cut (null: unreadable). */
+  private pixels: RgbaImage | null | undefined;
+  private cutting: ReturnType<typeof setTimeout> | undefined;
 
   private readonly backdrop = new Container();
   private backdropSprite: Sprite | undefined;
@@ -320,7 +375,9 @@ export class StoryStageRenderer {
   private readonly lifts = new Map<string, number>();
   /** Lift states last reported, so each change is emitted once. */
   private reportedLifts = "";
-  private readonly mattes = new Graphics();
+  /** Paper patches where the scene pieces lie on the drawing. */
+  private readonly mattes = new Container();
+  private readonly matteShapes = new Graphics();
   private readonly entityLayer = new Container();
   private readonly rainLayer = new Graphics();
   private readonly confettiLayer = new Graphics();
@@ -647,6 +704,27 @@ export class StoryStageRenderer {
     this.focusedId = entityId;
   }
 
+  /**
+   * How each drawn piece stands right now, in stage units: its centre,
+   * scale, rotation and alpha as last drawn, and `top`, the top edge of its
+   * box after scaling. For tests; drawing never reads it.
+   */
+  piecePoses(): Record<string, StagePiecePose> {
+    const poses: Record<string, StagePiecePose> = {};
+    for (const [id, { entity, container }] of this.views)
+      poses[id] = {
+        x: container.position.x,
+        y: container.position.y,
+        scaleX: container.scale.x,
+        scaleY: container.scale.y,
+        rotation: container.rotation,
+        alpha: container.alpha,
+        top:
+          container.position.y - (entity.bounds.height / 2) * container.scale.y,
+      };
+    return poses;
+  }
+
   /** Current time on the stage clock, in milliseconds. */
   get timeMs() {
     return this.clockMs;
@@ -671,6 +749,8 @@ export class StoryStageRenderer {
     for (const waiter of this.waiters) waiter.resolve();
     this.waiters = [];
     if (this.fallbackClock) clearInterval(this.fallbackClock);
+    if (this.cutting) clearTimeout(this.cutting);
+    this.pixels = undefined;
     if (this.image) {
       this.image.onload = null;
       this.image.onerror = null;
@@ -735,6 +815,10 @@ export class StoryStageRenderer {
     }
     for (const texture of this.textures) texture.destroy(false);
     this.textures = [];
+    for (const art of [...this.art.values(), ...this.retiredArt])
+      this.freeArt(art);
+    this.art.clear();
+    this.retiredArt = [];
     this.imageSource?.destroy();
     this.imageSource = undefined;
     this.image = undefined;
@@ -746,9 +830,7 @@ export class StoryStageRenderer {
     image.decoding = "async";
     image.onload = () => {
       if (this.destroyed) return;
-      this.imageStatus = "loaded";
-      if (this.initialized) this.refreshArt();
-      this.emit();
+      this.cutPieces();
     };
     image.onerror = () => {
       if (this.destroyed) return;
@@ -763,6 +845,125 @@ export class StoryStageRenderer {
   private refreshArt() {
     this.drawBackdrop();
     this.syncViews();
+  }
+
+  /**
+   * Cuts every scene piece out of the loaded drawing, yielding to the
+   * browser between pieces once a slice of time is used so no frame is held
+   * up, then shows the drawing. Cuts are shared by stages showing the same
+   * drawing, so a second stage (the keepsake's) usually finds them all made.
+   */
+  private cutPieces() {
+    this.cutting = undefined;
+    if (this.destroyed) return;
+    const started = performance.now();
+    for (const entity of this.world.entities) {
+      if (!this.sceneIds.has(entity.id)) continue;
+      const before = this.art.get(entity.id);
+      if (this.artFor(entity) === before) continue; // Already cut.
+      if (performance.now() - started > CUT_BUDGET_MS) {
+        this.cutting = setTimeout(() => this.cutPieces(), 0);
+        return;
+      }
+    }
+    this.pixels = undefined;
+    this.imageStatus = "loaded";
+    if (this.initialized) this.refreshArt();
+    this.emit();
+  }
+
+  /**
+   * A scene piece's cut for its current bounds, found or made on demand.
+   * Undefined for a piece not cut from the drawing.
+   */
+  private artFor(entity: Entity): PieceArt | undefined {
+    const image = this.image;
+    if (
+      !image ||
+      !this.sceneIds.has(entity.id) ||
+      this.imageStatus === "failed"
+    )
+      return undefined;
+    const scale = readScale(image);
+    const readWidth = Math.round(image.naturalWidth * scale);
+    const readHeight = Math.round(image.naturalHeight * scale);
+    const perX = readWidth / STAGE_WIDTH;
+    const perY = readHeight / STAGE_HEIGHT;
+    const { bounds } = entity;
+    const box = {
+      x: bounds.x * perX,
+      y: bounds.y * perY,
+      width: bounds.width * perX,
+      height: bounds.height * perY,
+    };
+    const key = [readWidth, readHeight, box.x, box.y, box.width, box.height]
+      .map((value) => Math.round(value * 100) / 100)
+      .join(",");
+    const current = this.art.get(entity.id);
+    if (current?.key === key) return current;
+    const cutout = cutoutFor(
+      this.scene.document.drawing.compositeImage,
+      key,
+      box,
+      // Read once while the first pieces are cut; a later cut (new bounds)
+      // reads afresh rather than holding the pixels for the stage's life.
+      () =>
+        this.imageStatus !== "loading"
+          ? readImagePixels(image)
+          : this.pixels === undefined
+            ? (this.pixels = readImagePixels(image))
+            : this.pixels,
+    );
+    // Its sprites may still be on stage until the next redraw.
+    if (current) this.retiredArt.push(current);
+    const art: PieceArt = {
+      key,
+      cutout,
+      rect: cutout && {
+        x: (cutout.box.x - cutout.pad) / perX,
+        y: (cutout.box.y - cutout.pad) / perY,
+        width: cutout.width / perX,
+        height: cutout.height / perY,
+      },
+    };
+    this.art.set(entity.id, art);
+    return art;
+  }
+
+  /** A cut's sticker and its plain silhouette, uploaded on first use. */
+  private artTextures(art: PieceArt, cutout: Cutout) {
+    if (!art.source || !art.sticker || !art.silhouette) {
+      const { width, height } = cutout;
+      art.source = new BufferImageSource({
+        resource: cutoutAtlas(cutout),
+        width,
+        height: height * 2,
+        format: "rgba8unorm",
+        alphaMode: "premultiplied-alpha",
+      });
+      art.sticker = new Texture({
+        source: art.source,
+        frame: new Rectangle(0, 0, width, height),
+      });
+      art.silhouette = new Texture({
+        source: art.source,
+        frame: new Rectangle(0, height, width, height),
+      });
+    }
+    return { sticker: art.sticker, silhouette: art.silhouette };
+  }
+
+  private freeArt(art: PieceArt) {
+    art.sticker?.destroy(false);
+    art.silhouette?.destroy(false);
+    art.source?.destroy();
+    art.sticker = art.silhouette = art.source = undefined;
+  }
+
+  private cutoutState(entity: Entity): StageCutout {
+    if (!this.hasCrop(entity)) return "none";
+    if (this.imageStatus !== "loaded") return "pending";
+    return this.artFor(entity)?.cutout ? "mask" : "rect";
   }
 
   // ---- clock -------------------------------------------------------------
@@ -1009,6 +1210,7 @@ export class StoryStageRenderer {
           centerY: Math.round(home.y + (offset?.y ?? 0)),
           reaction: reactions.active?.reaction,
           reactionCount: reactions.taps,
+          cutout: this.cutoutState(entity),
         };
       }),
     };
@@ -1026,10 +1228,13 @@ export class StoryStageRenderer {
     return this.sceneIds.has(entity.id) && this.imageStatus !== "failed";
   }
 
-  /** Removes and destroys a container's children, freeing sprite textures. */
+  /**
+   * Removes and destroys a container's children, freeing the one-off sprite
+   * textures this stage owns (a piece's cut is freed with its `PieceArt`).
+   */
   private clearChildren(container: Container) {
     for (const child of container.removeChildren()) {
-      if (child instanceof Sprite) {
+      if (child instanceof Sprite && this.textures.includes(child.texture)) {
         this.textures = this.textures.filter((item) => item !== child.texture);
         child.texture.destroy(false);
       }
@@ -1052,15 +1257,33 @@ export class StoryStageRenderer {
     }
   }
 
+  /** A paper patch over each scene piece's place on the drawing, its shape. */
   private drawMattes() {
-    this.mattes.clear();
+    // The patches share their pieces' textures, so only the sprites go.
+    for (const child of this.mattes.removeChildren())
+      if (child !== this.matteShapes) child.destroy();
+    this.matteShapes.clear();
+    this.mattes.addChild(this.matteShapes);
     if (this.imageStatus === "failed") return;
     for (const entity of this.world.entities) {
       if (!this.sceneIds.has(entity.id)) continue;
+      const art =
+        this.imageStatus === "loaded" ? this.artFor(entity) : undefined;
+      if (art?.cutout && art.rect) {
+        const { silhouette } = this.artTextures(art, art.cutout);
+        const patch = new Sprite(silhouette);
+        patch.tint = PAPER;
+        patch.alpha = MATTE_ALPHA;
+        patch.position.set(art.rect.x, art.rect.y);
+        patch.width = art.rect.width;
+        patch.height = art.rect.height;
+        this.mattes.addChild(patch);
+        continue;
+      }
       const { x, y, width, height } = entity.bounds;
-      this.mattes.roundRect(x, y, width, height, 6);
+      this.matteShapes.roundRect(x, y, width, height, 6);
     }
-    this.mattes.fill({ color: PAPER, alpha: 0.74 });
+    this.matteShapes.fill({ color: PAPER, alpha: MATTE_ALPHA });
   }
 
   private cropTexture(entity: Entity) {
@@ -1088,8 +1311,14 @@ export class StoryStageRenderer {
     // A drawing added mid-story is cut from the child's own strokes.
     const sketch = crop ? undefined : entity.sketch;
     const look = entityLook(entity);
+    const art =
+      crop && this.imageStatus === "loaded" ? this.artFor(entity) : undefined;
     const drawnAs = [
-      crop ? `crop:${this.imageStatus}` : sketch ? "sketch" : "token",
+      crop
+        ? `crop:${this.imageStatus}:${art?.cutout ? art.key : "rect"}`
+        : sketch
+          ? "sketch"
+          : "token",
       look,
       entity.name,
       width,
@@ -1105,20 +1334,36 @@ export class StoryStageRenderer {
     view.glow.alpha = 0;
     container.addChild(view.glow);
 
+    if (art?.cutout && art.rect) {
+      // A sticker cut along the strokes, with a shadow the same shape.
+      const { sticker, silhouette } = this.artTextures(art, art.cutout);
+      const rect = art.rect;
+      const place = (sprite: Sprite, dy = 0) => {
+        sprite.position.set(
+          rect.x - (entity.bounds.x + width / 2),
+          rect.y - (entity.bounds.y + height / 2) + dy,
+        );
+        sprite.width = rect.width;
+        sprite.height = rect.height;
+        return sprite;
+      };
+      for (const [dy, alpha] of SHADOW_LAYERS) {
+        const shadow = place(new Sprite(silhouette), dy);
+        shadow.tint = INK;
+        shadow.alpha = alpha;
+        container.addChild(shadow);
+      }
+      container.addChild(place(new Sprite(sticker)));
+      return;
+    }
+
     const shape: EntityLook = crop || sketch ? "thing" : look;
     const shadow = new Graphics();
-    tokenShape(shadow, shape, width, height, 2, 6).fill({
-      color: INK,
-      alpha: 0.08,
-    });
-    tokenShape(shadow, shape, width, height, 1, 4).fill({
-      color: INK,
-      alpha: 0.1,
-    });
-    tokenShape(shadow, shape, width, height, 1, 1).fill({
-      color: INK,
-      alpha: 0.14,
-    });
+    for (const [index, [dy, alpha]] of SHADOW_LAYERS.entries())
+      tokenShape(shadow, shape, width, height, index ? 1 : 2, dy).fill({
+        color: INK,
+        alpha,
+      });
     const edge = new Graphics();
     tokenShape(edge, shape, width, height, 3).fill(
       look === "span" && !crop && !sketch ? 0xf8deb8 : PAPER_EDGE,
@@ -1229,6 +1474,11 @@ export class StoryStageRenderer {
       view.container.destroy();
       this.views.delete(id);
     }
+    for (const [id, art] of this.art) {
+      if (seen.has(id)) continue;
+      this.retiredArt.push(art);
+      this.art.delete(id);
+    }
     for (const id of this.detachedReactions.keys())
       if (!seen.has(id)) this.detachedReactions.delete(id);
     // Scenery below, travellers above; world order within each layer.
@@ -1241,6 +1491,9 @@ export class StoryStageRenderer {
       if (view) this.entityLayer.addChild(view.container);
     }
     this.drawMattes();
+    // Nothing draws a replaced or removed cut any more.
+    for (const art of this.retiredArt) this.freeArt(art);
+    this.retiredArt = [];
   }
 
   // ---- input -------------------------------------------------------------

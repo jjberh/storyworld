@@ -12,11 +12,17 @@ import type { StorySequence } from "@storyworld/contracts/story-beat";
 import {
   INITIAL_CAPTION,
   StoryStageRenderer,
+  type StagePiecePose,
   type StageRestingState,
   type StageSnapshot,
 } from "./story-stage-renderer";
 import { center, logicalX } from "./story-playback";
 import { RevealHandoff } from "./reveal-handoff";
+
+type StageTestWindow = Window & {
+  __storyStageTest?: boolean;
+  __storyStageDebug?: { poses: () => Record<string, StagePiecePose> };
+};
 
 function restingSnapshot(world: WorldState, reveal: boolean): StageSnapshot {
   return {
@@ -37,6 +43,7 @@ function restingSnapshot(world: WorldState, reveal: boolean): StageSnapshot {
       centerY: Math.round(center(entity.bounds).y),
       reaction: undefined,
       reactionCount: 0,
+      cutout: "pending",
     })),
   };
 }
@@ -127,6 +134,19 @@ export function StoryStage({
   useEffect(() => {
     renderer?.setWorld(world);
   }, [renderer, world]);
+
+  // End-to-end tests read the pieces' drawn poses instead of sampling canvas
+  // pixels. Only a page that set `__storyStageTest` before loading gets the
+  // hook; nothing else changes either way.
+  useEffect(() => {
+    const page = window as StageTestWindow;
+    if (!renderer || !page.__storyStageTest) return;
+    const debug = { poses: () => renderer.piecePoses() };
+    page.__storyStageDebug = debug;
+    return () => {
+      if (page.__storyStageDebug === debug) delete page.__storyStageDebug;
+    };
+  }, [renderer]);
 
   // One playback lifetime per renderer. A new sequence is handed to the
   // renderer without aborting the old one, so the beat on stage finishes
@@ -231,6 +251,7 @@ export function StoryStage({
             data-center-y={entity.centerY}
             data-reaction={entity.reaction}
             data-reaction-count={entity.reactionCount}
+            data-cutout={entity.cutout}
           >
             <button
               type="button"

@@ -104,10 +104,15 @@ async function openRoom(page: Page, mode: "fixture" | "live" = "fixture") {
   await page.route("**/api/interpret/scene", (route) =>
     route.fulfill({ json: scene }),
   );
+  // Turn on the stage's test hook, which reports each piece's drawn pose.
+  await page.addInitScript(() => {
+    (window as unknown as { __storyStageTest: boolean }).__storyStageTest =
+      true;
+  });
   await page.goto("/?mode=" + mode);
   await page.getByRole("button", { name: "Start from scratch" }).click();
-  // A castle outline inside the castle's box, so its paper piece carries ink
-  // the canvas checks below can find.
+  // A castle outline inside the castle's box, so its paper piece is cut from
+  // real ink.
   const canvas = page.locator(".drawing-layer canvas").last();
   await expect(canvas).toBeVisible();
   // The paper sizes its canvas from a ResizeObserver, a frame or two behind
@@ -151,63 +156,44 @@ async function openRoom(page: Page, mode: "fixture" | "live" = "fixture") {
 
 const allStates = (frame: Frame) => Object.values(frame.states);
 
+type Pose = { top: number; scaleX: number; scaleY: number };
+
 /**
- * The topmost row (in canvas pixels) of the castle's crayon ink, read from a
- * clipped screenshot of the stage canvas. It moves up only if the piece
- * rises. The page is tall enough that the stage never scrolls away.
+ * The castle piece as the stage last drew it (through its test hook): the
+ * top edge of its box after scaling, in stage units, and its scale. The top
+ * moves up only if the piece rises or grows.
  */
-async function castleInkTop(page: Page, clip: Clip) {
-  const shot = await page.screenshot({ clip, type: "jpeg", quality: 90 });
-  return page.evaluate(async (data) => {
-    const image = new Image();
-    image.src = "data:image/jpeg;base64," + data;
-    await image.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = image.width;
-    canvas.height = image.height;
-    const context = canvas.getContext("2d")!;
-    context.drawImage(image, 0, 0);
-    const { width, height } = canvas;
-    const pixels = context.getImageData(0, 0, width, height).data;
-    // The castle's box spans x 0.7–0.9 and y 0.2–0.4 of the stage.
-    for (let y = Math.round(height * 0.05); y < height * 0.5; y++) {
-      let ink = 0;
-      for (let x = Math.round(width * 0.7); x < width * 0.9; x++) {
-        const index = (y * width + x) * 4;
-        // Orange crayon: far more red than blue; paper and shadows are not.
-        if (pixels[index]! - pixels[index + 2]! > 40) ink++;
-      }
-      if (ink >= 3) return y;
-    }
-    return null;
-  }, shot.toString("base64"));
+function castlePose(page: Page) {
+  return page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __storyStageDebug?: { poses: () => Record<string, Pose> };
+        }
+      ).__storyStageDebug?.poses().castle ?? null,
+  );
 }
 
-type Clip = { x: number; y: number; width: number; height: number };
-
-/** Where the stage canvas is, once it is in view. */
-async function stageClip(page: Page): Promise<Clip> {
-  const canvas = page.locator(".story-stage-canvas");
-  await canvas.scrollIntoViewIfNeeded();
-  return (await canvas.boundingBox())!;
-}
-
-/** Stage time between canvas samples during the reveal. */
+/** Stage time between samples during the reveal. */
 const SAMPLE_STEP_MS = 150;
+/** The castle must rise at least this far (stage units) to count as lifted;
+ * the reveal's peak is a 22-unit rise plus a 7% swell. */
+const LIFT_THRESHOLD = 8;
 
 /**
- * Samples the castle's ink top until the reveal is done, with the castle's
+ * Samples the castle's pose until the reveal is done, with the castle's
  * reveal state at each sample. The page clock (installed before the room
  * opened) is held and stepped between samples, so each one is a known moment
- * of the reveal however slowly screenshots come back on a busy machine.
- * Holding it fires each timer at most once, and the stage advances at most
- * 100 ms a frame, so the reveal barely moves while it is caught. The clock
- * runs freely again once the reveal is done.
+ * of the reveal however slowly the page answers on a busy machine. Holding it
+ * fires each timer at most once, and the stage advances at most 100 ms a
+ * frame, so the reveal barely moves while it is caught. The clock runs freely
+ * again once the reveal is done.
  */
-async function castleTopsDuringReveal(page: Page) {
-  const clip = await stageClip(page);
+async function castlePosesDuringReveal(page: Page) {
+  // The stage has drawn the castle at least once.
+  await expect.poll(() => castlePose(page)).not.toBeNull();
   await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
-  const samples: { top: number | null; state: string | null }[] = [];
+  const samples: (Pose & { state: string | null })[] = [];
   const castleState = () =>
     page.evaluate(() =>
       document
@@ -219,14 +205,18 @@ async function castleTopsDuringReveal(page: Page) {
         : undefined,
     );
   for (let state = await castleState(); state !== undefined;) {
-    samples.push({ top: await castleInkTop(page, clip), state });
+    samples.push({ ...(await castlePose(page))!, state });
     await page.clock.runFor(SAMPLE_STEP_MS);
     state = await castleState();
   }
   // Landed, where it started.
-  const rest = await castleInkTop(page, clip);
+  const rest = (await castlePose(page))!;
   await page.clock.resume();
-  return { samples, rest };
+  // One screen pixel of the stage, in stage units.
+  const width = await page
+    .locator(".story-stage-canvas")
+    .evaluate((canvas) => canvas.getBoundingClientRect().width);
+  return { samples, rest, pixel: 1000 / width };
 }
 
 /** The reveal as traced: flat, lifting, landed, then the opening. */
@@ -276,20 +266,21 @@ test("Start my story opens the room with the lift-off reveal, then the opening",
   // Flat or rising pieces cannot be tickled yet.
   await expect(stage).toHaveAttribute("data-intro", "playing");
   await expect(page.getByRole("button", { name: "Tickle Fox" })).toBeDisabled();
-  // The castle's ink rises off the paper during the reveal.
-  const { samples, rest } = await castleTopsDuringReveal(page);
+  // The castle rises off the paper during the reveal.
+  const { samples, rest, pixel } = await castlePosesDuringReveal(page);
   await waitForReveal(page);
-  // Caught flat on the paper first.
+  // Caught flat on the paper first: at its box, unscaled.
   expect(samples[0]!.state).toBe("flat");
-  const flat = samples[0]!.top!;
-  expect(flat).not.toBeNull();
+  const flat = samples[0]!.top;
+  expect(flat).toBeCloseTo(120, 1);
+  expect(samples[0]!.scaleY).toBe(1);
   const lifted = samples.filter((sample) => sample.state === "lifting");
-  expect(Math.min(...lifted.map((sample) => sample.top ?? flat))).toBeLessThan(
-    flat - 6,
+  expect(Math.min(...lifted.map((sample) => sample.top))).toBeLessThan(
+    flat - LIFT_THRESHOLD,
   );
-  // And it lands back where it lay.
-  expect(rest).not.toBeNull();
-  expect(Math.abs(rest! - flat)).toBeLessThanOrEqual(1);
+  // And it lands back where it lay, to within a screen pixel (its idle
+  // sway included).
+  expect(Math.abs(rest.top - flat)).toBeLessThanOrEqual(pixel);
   await expect(page.getByRole("button", { name: "Tickle Fox" })).toBeEnabled();
   // The opening narration plays after the reveal.
   await expect(page.locator(".paper-theater-caption")).not.toHaveText(READY);
@@ -356,19 +347,19 @@ test("reduced motion fades the pieces in instead of lifting them", async ({
     "data-motion",
     "reduced",
   );
-  const { samples, rest } = await castleTopsDuringReveal(page);
+  const { samples, rest, pixel } = await castlePosesDuringReveal(page);
   await waitForReveal(page);
   await expect(page.locator(".paper-theater-caption")).not.toHaveText(READY);
   // Same flat → fade → landed order, and the opening after it.
   expectFullReveal(await trace());
-  // No rise and no shake: the castle's ink never leaves its resting row,
-  // including while it fades in.
-  expect(rest).not.toBeNull();
+  // No rise, no swell and no shake: the castle never leaves its resting
+  // place, including while it fades in.
   expect(samples[0]!.state).toBe("flat");
   expect(samples.some((sample) => sample.state === "lifting")).toBe(true);
-  for (const { top } of samples) {
-    expect(top).not.toBeNull();
-    expect(Math.abs(top! - rest!)).toBeLessThanOrEqual(1);
+  for (const { top, scaleX, scaleY } of [...samples, rest]) {
+    expect(Math.abs(top - rest.top)).toBeLessThanOrEqual(pixel);
+    expect(scaleX).toBe(1);
+    expect(scaleY).toBe(1);
   }
 });
 
