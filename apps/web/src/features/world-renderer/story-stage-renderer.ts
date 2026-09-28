@@ -18,6 +18,7 @@ import type {
 import {
   approach,
   beatPulse,
+  beatPulseElapsedMs,
   combinePoses,
   idleMotionFor,
   RESTING_POSE,
@@ -40,6 +41,7 @@ import {
 import {
   beatHoldMs,
   beatMovement,
+  beatTravelMs,
   center,
   logicalX,
   pendingRevealId,
@@ -137,8 +139,9 @@ export type StoryStageOptions = {
    */
   canvasCaptions?: boolean;
   /**
-   * The shortest time a beat holds, in milliseconds. A recording lengthens
-   * beats so their captions stay readable; the live stage leaves this at 0.
+   * The shortest time a beat holds, in milliseconds; the live stage leaves
+   * this at 0. A recording passes its readable minimum, the floor its beat
+   * cap never goes below.
    */
   minBeatHoldMs?: number;
   /**
@@ -206,6 +209,8 @@ type EntityView = {
   moveFrom: Offset;
   moveTo: Offset;
   moveStartMs: number;
+  /** How long the move from `moveFrom` to `moveTo` takes. */
+  moveDurationMs: number;
   hidden: number;
   reactions: ReactionState;
 };
@@ -328,6 +333,8 @@ export class StoryStageRenderer {
   private caption = INITIAL_CAPTION;
   private action: StoryAction | null = null;
   private actionStartMs = 0;
+  /** How long the beat on stage carries its own piece (0 if it stays put). */
+  private actionTravelMs = 0;
   private rain = false;
   private confettiStartMs: number | undefined;
   private sequence: StorySequence | null = null;
@@ -486,7 +493,7 @@ export class StoryStageRenderer {
         if (aborted()) return;
         const action = storyBeat.action;
         const hold = Math.min(
-          Math.max(beatHoldMs(action, this.reducedMotion), this.minBeatHoldMs),
+          Math.max(beatHoldMs(action), this.minBeatHoldMs),
           this.maxBeatHoldMs,
         );
         // Claim the stage for this beat before any await, so a sequence that
@@ -503,7 +510,12 @@ export class StoryStageRenderer {
           }
           this.completedRevealEventId = sequence.sourceEventId;
         }
-        this.applyBeatEffects(sequence, index, world);
+        this.applyBeatEffects(
+          sequence,
+          index,
+          world,
+          beatTravelMs(action.type, hold, this.reducedMotion),
+        );
         this.playedBeats = index + 1;
         this.emit();
         this.beatEndsAtMs = this.clockMs + hold;
@@ -889,11 +901,15 @@ export class StoryStageRenderer {
       };
   }
 
-  /** Moves, parks and weather for one beat, without any timing. */
+  /**
+   * Moves, parks and weather for one beat. A piece the beat moves travels for
+   * `travelMs` (0 puts it there at once).
+   */
   private applyBeatEffects(
     sequence: StorySequence,
     index: number,
     world: WorldState,
+    travelMs = 0,
   ) {
     const action = sequence.beats[index].action;
     const moved = beatMovement(
@@ -902,7 +918,13 @@ export class StoryStageRenderer {
       world,
     );
     if (moved) {
-      this.moveTo(moved.entityId, moved.movement.offset);
+      const from = this.offsets.get(moved.entityId) ?? { x: 0, y: 0 };
+      const to = moved.movement.offset;
+      // A piece already there (or still walking there) keeps its walk.
+      if (Math.hypot(to.x - from.x, to.y - from.y) >= 1) {
+        this.moveTo(moved.entityId, to, travelMs);
+        if (action === this.action) this.actionTravelMs = travelMs;
+      }
       this.placements.set(moved.entityId, moved.movement.placement);
     }
     if (action.type === "weather_shift") this.rain = action.weather === "rain";
@@ -928,13 +950,14 @@ export class StoryStageRenderer {
   private setAction(action: StoryAction | null) {
     this.action = action;
     this.actionStartMs = this.clockMs;
+    this.actionTravelMs = 0;
     this.confettiStartMs =
       action?.type === "celebrate" && !this.reducedMotion
         ? this.clockMs
         : undefined;
   }
 
-  private moveTo(entityId: string, offset: Offset) {
+  private moveTo(entityId: string, offset: Offset, durationMs: number) {
     this.offsets.set(entityId, offset);
     const view = this.views.get(entityId);
     if (!view) return;
@@ -944,9 +967,11 @@ export class StoryStageRenderer {
           view.moveFrom,
           view.moveTo,
           this.clockMs - view.moveStartMs,
+          view.moveDurationMs,
         );
     view.moveTo = offset;
     view.moveStartMs = this.clockMs;
+    view.moveDurationMs = durationMs;
   }
 
   private pendingReveal() {
@@ -1185,6 +1210,7 @@ export class StoryStageRenderer {
           moveFrom: offset,
           moveTo: offset,
           moveStartMs: this.clockMs,
+          moveDurationMs: 0,
           hidden: this.pendingReveal() === entity.id ? 1 : 0,
           reactions: this.detachedReactions.get(entity.id) ?? IDLE_REACTIONS,
         };
@@ -1262,7 +1288,12 @@ export class StoryStageRenderer {
       const home = center(entity.bounds);
       const offset = this.reducedMotion
         ? view.moveTo
-        : tweenOffset(view.moveFrom, view.moveTo, now - view.moveStartMs);
+        : tweenOffset(
+            view.moveFrom,
+            view.moveTo,
+            now - view.moveStartMs,
+            view.moveDurationMs,
+          );
       // A new drawing has its own lift, even mid-intro (see introIndex).
       const liftStart = this.lifts.get(entity.id);
       const introIndex = this.introIndex(entity.id);
@@ -1291,7 +1322,11 @@ export class StoryStageRenderer {
       const pulse = pulsing
         ? beatPulse(
             action!.type,
-            now - this.actionStartMs,
+            beatPulseElapsedMs(
+              action!.type,
+              now - this.actionStartMs,
+              this.actionTravelMs,
+            ),
             entity.bounds.height,
           )
         : undefined;

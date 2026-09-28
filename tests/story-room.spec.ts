@@ -1,5 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
-import { drawOnStory, mockEdit, mockJev, waitForReveal } from "./story-mocks";
+import {
+  drawOnStory,
+  mockEdit,
+  mockJev,
+  MOMENT_TIMEOUT,
+  traceStage,
+  waitForReveal,
+} from "./story-mocks";
 
 const response = {
   mode: "live",
@@ -157,6 +164,7 @@ test("a committed bridge stays visible while directing is delayed", async ({
   releaseBridge();
   await expect(page.locator(".paper-theater-caption")).toContainText(
     "The bridge is ready.",
+    { timeout: MOMENT_TIMEOUT },
   );
 });
 
@@ -167,6 +175,7 @@ test("a delayed older response cannot replace the newest event", async ({
   const openingGate = new Promise<void>((resolve) => {
     releaseOpening = resolve;
   });
+  let openingSettled = false;
   await page.route("**/api/story/sequence", async (route) => {
     const request = route.request().postDataJSON();
     if (request.committedEvent.revision === 0) await openingGate;
@@ -174,26 +183,30 @@ test("a delayed older response cannot replace the newest event", async ({
       (entity: { properties: string[] }) =>
         entity.properties.includes("carries"),
     );
-    await route.fulfill({
-      json: {
-        mode: "fixture",
-        requestId: request.requestId,
-        sourceRevision: request.committedEvent.revision,
-        sourceEventId: request.committedEvent.id,
-        beats: [
-          {
-            id: "beat-1",
-            narration: bridge
-              ? "The newest bridge moment wins."
-              : "This older opening must stay stale.",
-            mood: "curious",
-            action: bridge
-              ? { type: "reveal", entityId: bridge.id }
-              : { type: "focus", entityId: "fox" },
-          },
-        ],
-      },
-    });
+    // The page may already have given up on the stale request.
+    await route
+      .fulfill({
+        json: {
+          mode: "fixture",
+          requestId: request.requestId,
+          sourceRevision: request.committedEvent.revision,
+          sourceEventId: request.committedEvent.id,
+          beats: [
+            {
+              id: "beat-1",
+              narration: bridge
+                ? "The newest bridge moment wins."
+                : "This older opening must stay stale.",
+              mood: "curious",
+              action: bridge
+                ? { type: "reveal", entityId: bridge.id }
+                : { type: "focus", entityId: "fox" },
+            },
+          ],
+        },
+      })
+      .catch(() => undefined);
+    if (request.committedEvent.revision === 0) openingSettled = true;
   });
   await mockEdit(page, {
     name: "Bridge",
@@ -204,10 +217,20 @@ test("a delayed older response cannot replace the newest event", async ({
   await drawOnStory(page);
   await expect(page.locator(".paper-theater-caption")).toContainText(
     "The newest bridge moment wins.",
+    { timeout: MOMENT_TIMEOUT },
   );
+  // Once the stale opening has been answered and the newest moment has
+  // finished, it must never have reached the stage.
+  const trace = await traceStage(page);
   releaseOpening();
-  await expect(page.locator(".paper-theater-caption")).not.toContainText(
-    "This older opening must stay stale.",
+  await expect.poll(() => openingSettled).toBe(true);
+  await expect(page.locator(".paper-theater-stage")).toHaveAttribute(
+    "data-action",
+    "resting",
+    { timeout: MOMENT_TIMEOUT },
+  );
+  expect((await trace()).captions).not.toContainEqual(
+    expect.stringContaining("This older opening must stay stale."),
   );
 });
 
@@ -237,6 +260,8 @@ test("starting a story opens an addressable room with the confirmed picture", as
 test("a drawn bridge that Jev lets cross opens the route and celebrates", async ({
   page,
 }) => {
+  // Two crossings, each a few 2–4 s beats after the opening.
+  test.setTimeout(60_000);
   let releaseJev!: () => void;
   const inputs = await mockEdit(page, {
     name: "Bridge",
@@ -250,7 +275,9 @@ test("a drawn bridge that Jev lets cross opens the route and celebrates", async 
   });
   await startRoom(page);
   const hero = page.locator('[data-entity-id="fox"]');
-  await expect(hero).toHaveAttribute("data-placement", "near-obstacle");
+  await expect(hero).toHaveAttribute("data-placement", "near-obstacle", {
+    timeout: MOMENT_TIMEOUT,
+  });
   const riverbankX = Number(await hero.getAttribute("data-logical-x"));
   await expect(page.getByText("River blocks the route")).toBeVisible();
   await expect(
@@ -265,6 +292,7 @@ test("a drawn bridge that Jev lets cross opens the route and celebrates", async 
   // The new drawing gets its own reveal moment before Jev decides anything.
   await expect(page.locator(".paper-theater-caption")).toContainText(
     "Bridge joins the story.",
+    { timeout: MOMENT_TIMEOUT },
   );
   await expect(bridge).toHaveAttribute("data-reveal-state", "visible");
   await expect(page.getByTestId("pending-cutout")).toHaveCount(0);
@@ -277,7 +305,9 @@ test("a drawn bridge that Jev lets cross opens the route and celebrates", async 
   await expect(
     page.getByText(/02 · Bridge: a way across · route opened/),
   ).toBeVisible();
-  await expect(page.getByText(/Fox made it across!/)).toBeVisible();
+  await expect(page.getByText(/Fox made it across!/)).toBeVisible({
+    timeout: MOMENT_TIMEOUT,
+  });
   await expect(hero).toHaveAttribute("data-placement", "target-side");
   const targetSideX = Number(await hero.getAttribute("data-logical-x"));
   expect(targetSideX).toBeGreaterThan(riverbankX);
@@ -287,12 +317,20 @@ test("a drawn bridge that Jev lets cross opens the route and celebrates", async 
   );
 
   // A second crossing on an open route keeps Fox where it is.
+  const trace = await traceStage(page);
   await drawOnStory(page, [0.4, 0.75], [0.62, 0.77]);
   await expect(page.getByText(/04 · Bridge: a way across/)).toBeVisible();
-  await page.waitForTimeout(800);
-  await expect(page.locator(".paper-theater-caption")).not.toContainText(
-    "still",
+  // Let its whole moment play (Fox crosses last), then check every caption.
+  await expect
+    .poll(async () => (await trace()).captions, { timeout: MOMENT_TIMEOUT })
+    .toContainEqual(expect.stringContaining("Fox crosses"));
+  await expect(page.locator(".paper-theater-stage")).toHaveAttribute(
+    "data-action",
+    "resting",
+    { timeout: MOMENT_TIMEOUT },
   );
+  const { captions } = await trace();
+  expect(captions.filter((caption) => caption.includes("still"))).toEqual([]);
   await expect(hero).toHaveAttribute("data-placement", "target-side");
   expect(Number(await hero.getAttribute("data-logical-x"))).toBe(targetSideX);
 });
@@ -348,7 +386,9 @@ test("slow strokes drawn close together become one drawing", async ({
   await expect(page.getByText(/02 · Balloon: a flight over/)).toBeVisible();
   expect(inputs).toHaveLength(1);
   await expect(page.locator("[data-entity-id]")).toHaveCount(4);
-  await expect(page.getByText(/Fox made it across!/)).toBeVisible();
+  await expect(page.getByText(/Fox made it across!/)).toBeVisible({
+    timeout: MOMENT_TIMEOUT,
+  });
 });
 
 test("a stroke that ends outside the stage still becomes a drawing", async ({
@@ -430,6 +470,7 @@ test("a funny failure from Jev keeps the route blocked", async ({ page }) => {
   await expect(page.getByText(/02 · Raft: splash!/)).toBeVisible();
   await expect(page.locator(".paper-theater-caption")).toContainText(
     "Splash! Fox tumbles into River",
+    { timeout: MOMENT_TIMEOUT },
   );
   await expect(page.locator(".drawing-note")).toContainText("Splash!");
   await expect(page.locator(".drawing-note")).not.toContainText(/wrong/i);
@@ -474,7 +515,9 @@ test("the paper theater keeps its semantic playback on a reduced-motion mobile v
   await startRoom(page);
   await expect(page.getByTestId("paper-theater")).toBeVisible();
   await drawOnStory(page);
-  await expect(page.getByText(/Fox made it across!/)).toBeVisible();
+  await expect(page.getByText(/Fox made it across!/)).toBeVisible({
+    timeout: MOMENT_TIMEOUT,
+  });
   await expect(page.locator(".paper-confetti")).toHaveCount(0);
 });
 
@@ -512,10 +555,12 @@ async function waitForRest(page: Page) {
   await expect(page.locator('[data-entity-id="fox"]')).toHaveAttribute(
     "data-placement",
     "near-obstacle",
+    { timeout: MOMENT_TIMEOUT },
   );
   await expect(page.locator(".paper-theater-stage")).toHaveAttribute(
     "data-action",
     "resting",
+    { timeout: MOMENT_TIMEOUT },
   );
 }
 

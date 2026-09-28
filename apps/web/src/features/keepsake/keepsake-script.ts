@@ -23,8 +23,9 @@ export const MAX_MOVIE_MS = 15_000;
  */
 export const PLANNED_MAX_MS = MAX_MOVIE_MS - 500;
 /**
- * Beats hold at least this long in the movie so captions stay readable, and
- * no shorter than their live hold unless the movie would run too long.
+ * Beats hold at least this long in the movie so captions stay readable. They
+ * keep their live 2–4 s holds unless the movie would run too long, and are
+ * never shortened below this.
  */
 export const KEEPSAKE_BEAT_MS = 1400;
 /** How finely the planner shortens long beat holds to fit the budget. */
@@ -135,13 +136,9 @@ export function pickBestMoment(
  * How long one beat holds in the movie: its live hold, at least
  * `KEEPSAKE_BEAT_MS`, and at most `maxBeatMs` when the budget needs it.
  */
-export function keepsakeBeatMs(
-  action: StoryAction,
-  reducedMotion = false,
-  maxBeatMs = Infinity,
-) {
+export function keepsakeBeatMs(action: StoryAction, maxBeatMs = Infinity) {
   return Math.min(
-    Math.max(beatHoldMs(action, reducedMotion), KEEPSAKE_BEAT_MS),
+    Math.max(beatHoldMs(action), KEEPSAKE_BEAT_MS),
     Math.max(maxBeatMs, KEEPSAKE_BEAT_MS),
   );
 }
@@ -155,7 +152,7 @@ export function sequenceDurationMs(
   return sequence.beats.reduce(
     (total, item) =>
       total +
-      keepsakeBeatMs(item.action, reducedMotion, maxBeatMs) +
+      keepsakeBeatMs(item.action, maxBeatMs) +
       (item.action.type === "reveal" && !reducedMotion ? REVEAL_FRAMES_MS : 0),
     0,
   );
@@ -180,7 +177,7 @@ export function fitBeats(
   if (total() <= budgetMs) return { maxBeatMs: undefined };
   const longest = Math.max(
     ...sequences.flatMap((item) =>
-      item.beats.map((beat) => keepsakeBeatMs(beat.action, reducedMotion)),
+      item.beats.map((beat) => keepsakeBeatMs(beat.action)),
     ),
   );
   for (
