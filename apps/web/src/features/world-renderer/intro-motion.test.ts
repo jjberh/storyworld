@@ -184,14 +184,12 @@ describe("a new drawing's lift-off", () => {
     });
   });
 
-  it("only fades in under reduced motion", () => {
+  it("stays still and fully shown under reduced motion: no blink as its cutout hands over", () => {
     const lift = DRAWING_LIFT.liftMs;
-    expect(sampleIntro(0, 0, 1, true, DRAWING_LIFT).alpha).toBe(0);
-    for (const t of [0.1, 0.35, 0.5, 0.9]) {
+    for (const t of [0, 0.1, 0.35, 0.5, 0.9, 1]) {
       const sample = sampleIntro(lift * t, 0, 1, true, DRAWING_LIFT);
       expect(sample.pose).toEqual(RESTING_POSE);
-      expect(sample.alpha).toBeGreaterThan(0);
-      expect(sample.alpha).toBeLessThan(1);
+      expect(sample.alpha).toBe(1);
     }
   });
 });
