@@ -127,7 +127,7 @@ export function introDurationMs(count: number, timing: IntroTiming) {
  * One piece `elapsedMs` into the intro. Before its turn a fading piece is
  * fully transparent, so the backdrop drawing underneath shows in its place.
  * The gentle variant (reduced motion) only fades the piece in: no rise or
- * shake.
+ * shake. A piece that does not fade in stays as it is.
  */
 export function sampleIntro(
   elapsedMs: number,
@@ -140,12 +140,13 @@ export function sampleIntro(
     (elapsedMs - introPieceStartMs(index, count, timing)) / timing.liftMs;
   if (t >= 1) return { pose: RESTING_POSE, alpha: 1, idle: 1 };
   if (t <= 0)
+    return { pose: RESTING_POSE, alpha: timing.fadeIn ? 0 : 1, idle: 0 };
+  if (gentle)
     return {
       pose: RESTING_POSE,
-      alpha: gentle || timing.fadeIn ? 0 : 1,
-      idle: 0,
+      alpha: timing.fadeIn ? smoothstep(t) : 1,
+      idle: 1,
     };
-  if (gentle) return { pose: RESTING_POSE, alpha: smoothstep(t), idle: 1 };
 
   // Peel up quickly, hang in the air with a little shake, then land.
   const rise =
