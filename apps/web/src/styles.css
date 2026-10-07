@@ -782,6 +782,10 @@ h2 {
 .timeline-item strong {
   font-size: 11px;
 }
+.timeline-item small {
+  color: #6b5885;
+  font-size: 10px;
+}
 .proposal {
   padding: 12px;
   background: #f0e9fc;

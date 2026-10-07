@@ -8,7 +8,7 @@ The foundation demo is deterministic:
 Nova wants to reach the castle, but the river blocks her.
 Draw a bridge -> it joins the world; Jev decides what happens (a crossing opens the route, a funny miss keeps it blocked).
 Draw a storm cloud -> the world becomes rainy.
-Reset or rewind -> the semantic world returns to an earlier revision.
+Reset world -> the semantic world returns to its starting state as a new revision.
 ```
 
 Provider output is never silently faked. `POST /api/interpret/edit` calls Gemini when `GEMINI_API_KEY` is set and otherwise returns a deterministic response labelled `"mode": "fixture"`. `POST /api/interpret/scene` does the same for an uploaded picture, and `POST /api/story/sequence` directs one committed event into one to three validated presentation beats. `POST /api/interactions` asks Jev what happens when a new drawing enters the world; it has no fixture: without `JEV_STORYWORLD_KEY` it answers `PROVIDER_NOT_CONFIGURED` and drawings are still added, just without an outcome. The ElevenLabs routes still return `501` until those integrations are implemented.
@@ -57,7 +57,7 @@ Multiple candidates or confidence below 0.8 prompt a friendly choice before any 
 
 Verify the recovery path by returning a 504 from `/api/interpret/edit`, drawing a bridge, editing the narration, and retrying. The route must remain blocked until an interpretation is accepted, its operation commits, and Jev's outcome for it is committed. There are no sample-object buttons; drawing is the only way to add something. Browser coverage in `tests/drawing-flow.spec.ts` exercises timeout recovery, ambiguous results, uploads, and guest proposals.
 
-Dismiss an uncertain preview with **Keep drawing** to revise your words and retry the same image. Reset and rewind discard the draft and its retry image; results from interpretations started before the restore are ignored.
+Dismiss an uncertain preview with **Keep drawing** to revise your words and retry the same image. Reset discards the draft and its retry image; results from interpretations started before the reset are ignored.
 
 Provider work proposes a `SceneInterpretationResponse`: image-space object candidates, confidence scores, opening narration, character and goal references, and mood hints. The child confirms or corrects those candidates before the application creates world operations. A confirmed `WorldEvent` is the handoff for visual and audio reactions; it carries a stable event ID, revision, readable summary, and the complete committed world state.
 
@@ -68,7 +68,7 @@ Every entity has a `role` the engine needs, a friendly `name`, a short `descript
 - Roles: `character` (the one hero), `goal` (a place to reach), `obstacle`, `helper`, `scenery`.
 - Properties: `moves`, `flies`, `swims`, `floats`, `carries`, `launches`, `blocks`, `burns`, `scares`, `shelters`, `weather`, `goal`.
 
-The world rules read properties through `@storyworld/contracts/entity-traits`: anything that `blocks` between the character and the goal blocks the route until a committed interaction outcome crosses it (the world's `crossings`), and anything with `weather` brings rain. `pathStatus` is `blocked` or `available` when there is a goal, `free_play` when there is a character but no goal (nothing to reach; Story Room says "Free play: draw anything!"), and `idle` when there is no character. A drawing's geometry alone never opens a route, nothing that still blocks the route can be removed (rewind and reset remain), and the drawing being judged is never its own obstacle: something that itself blocks the route cannot get anyone past itself. `description` is model-written text: it is shown to the story director and Jev only as untrusted guidance and never decides structure. The Nova fixture maps to Nova (`character`, `moves`), River (`obstacle`, `blocks`) and Castle (`goal`, `goal`); the fixture interpreter reads a drawing as a bridge (`helper`, `carries`) or, with the cloud tool, a storm cloud (`scenery`, `weather`).
+The world rules read properties through `@storyworld/contracts/entity-traits`: anything that `blocks` between the character and the goal blocks the route until a committed interaction outcome crosses it (the world's `crossings`), and anything with `weather` brings rain. `pathStatus` is `blocked` or `available` when there is a goal, `free_play` when there is a character but no goal (nothing to reach; Story Room says "Free play: draw anything!"), and `idle` when there is no character. A drawing's geometry alone never opens a route, nothing that still blocks the route can be removed (the reset and rewind reducers still restore earlier states), and the drawing being judged is never its own obstacle: something that itself blocks the route cannot get anyone past itself. `description` is model-written text: it is shown to the story director and Jev only as untrusted guidance and never decides structure. The Nova fixture maps to Nova (`character`, `moves`), River (`obstacle`, `blocks`) and Castle (`goal`, `goal`); the fixture interpreter reads a drawing as a bridge (`helper`, `carries`) or, with the cloud tool, a storm cloud (`scenery`, `weather`).
 
 ### Interactions (Jev)
 
@@ -240,7 +240,7 @@ The retained Nova collaboration fixture still uses separate browser profiles and
 an explicit test URL such as `?mode=live&world=josh-demo-1&fixture=nova`. The
 browser profile that creates the room is its director; a different profile can
 contribute at `/join?mode=live&world=josh-demo-1&fixture=nova`. After accepting
-a change, refresh both profiles and use the timeline to rewind; both clients
+a change, refresh both profiles and press **Reset world**; both clients
 should converge on the same state. The live client reconnects after a short
 connection interruption and resends an interrupted reducer call once with its
 original request ID.
