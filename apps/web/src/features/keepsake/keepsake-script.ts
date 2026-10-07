@@ -7,7 +7,7 @@ import {
   introDurationMs,
   KEEPSAKE_INTRO,
 } from "../world-renderer/intro-motion";
-import { beatHoldMs } from "../world-renderer/story-playback";
+import { beatHoldMs, MIN_BEAT_HOLD_MS } from "../world-renderer/story-playback";
 import type { StageTitleCard } from "../world-renderer/story-stage-renderer";
 
 // The keepsake movie's script, built from the room's committed history: the
@@ -23,11 +23,12 @@ export const MAX_MOVIE_MS = 15_000;
  */
 export const PLANNED_MAX_MS = MAX_MOVIE_MS - 500;
 /**
- * Beats hold at least this long in the movie so captions stay readable. They
- * keep their live 2–4 s holds unless the movie would run too long, and are
- * never shortened below this.
+ * Beats hold at least this long in the movie, the shortest live hold (2 s),
+ * so a young child can follow each one and hear its caption read. They keep
+ * their live 2–4 s holds unless the movie would run too long, and are never
+ * shortened below this: the opening is dropped instead.
  */
-export const KEEPSAKE_BEAT_MS = 1400;
+export const KEEPSAKE_BEAT_MS = MIN_BEAT_HOLD_MS;
 /** How finely the planner shortens long beat holds to fit the budget. */
 const BEAT_CAP_STEP_MS = 50;
 /** The end card's scripted length. The recorder may shorten it in real time
@@ -232,7 +233,7 @@ export function movieTitle(heroName: string | undefined) {
  * own beat holds: if the sequences would run too long, the longest holds are
  * shortened toward `KEEPSAKE_BEAT_MS` (`fitBeats`), and if that is not
  * enough the opening sequence is dropped. The moment alone always fits: a
- * sequence has at most three beats (the contract's cap), under 4.5 s at the
+ * sequence has at most three beats (the contract's cap), about 6 s at the
  * shortest hold, after an intro of at most 3.25 s. No beat is cut mid-way.
  */
 export function buildKeepsakeScript(
