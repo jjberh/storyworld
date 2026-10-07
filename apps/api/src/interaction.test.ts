@@ -568,6 +568,10 @@ describe("interaction resolver in free play", () => {
       entityId: "nova",
     });
     expect(heroless.pathStatus).toBe("idle");
+    // Without a character there is nobody free to play.
+    expect(interactionState(heroless, "dragon-1").route.status).toBe(
+      "none: there is no character in the story yet",
+    );
     for (const [input, entityId] of [
       [world, "nova"],
       [heroless, "dragon-1"],

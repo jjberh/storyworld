@@ -248,7 +248,9 @@ export function interactionState(world: WorldState, entityId: string) {
           ? "open: the character can already reach the goal"
           : world.pathStatus === "blocked"
             ? "blocked: something is in the way"
-            : "none: there is no goal to reach, the character is free to play",
+            : world.pathStatus === "free_play"
+              ? "none: there is no goal to reach, the character is free to play"
+              : "none: there is no character in the story yet",
       obstacle: obstacle ? describe(obstacle) : null,
     },
     newDrawing: { ...describe(actor), placement: placement(actor, obstacle) },
