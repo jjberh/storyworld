@@ -36,7 +36,7 @@ const response = {
   ],
 };
 
-test("rewinding after a failed interpretation discards the stale retry", async ({
+test("resetting after a failed interpretation discards the stale retry", async ({
   page,
 }) => {
   await page.route("**/api/interpret/edit", (route) =>
@@ -47,7 +47,7 @@ test("rewinding after a failed interpretation discards the stale retry", async (
   await expect(
     page.getByRole("button", { name: "Try my drawing again" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /The adventure begins/ }).click();
+  await page.getByRole("button", { name: "Reset world" }).click();
   await expect(
     page.getByRole("button", { name: "Try my drawing again" }),
   ).toHaveCount(0);

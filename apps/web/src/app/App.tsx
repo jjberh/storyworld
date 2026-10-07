@@ -495,34 +495,24 @@ export function FixtureExperience() {
             <div className="divider" />
             <div className="moments-card">
               <h2>Story Moments</h2>
-              <button
-                className="timeline-item"
-                disabled={drawingBusy || !snapshot.isDirector || requestedGuest}
-                onClick={() => void run(() => client.rewind(0))}
-              >
-                <i />
-                <span>
-                  <strong>The adventure begins</strong>
-                  <small>Restore the opening world</small>
-                </span>
-              </button>
-              {snapshot.events.slice(-6).map((e) => (
-                <button
-                  className="timeline-item"
-                  key={e.id}
-                  disabled={
-                    drawingBusy || !snapshot.isDirector || requestedGuest
-                  }
-                  onClick={() => void run(() => client.rewind(e.revision))}
-                >
+              <ol className="timeline">
+                <li className="timeline-item">
                   <i />
                   <span>
-                    <strong>
-                      {String(e.revision).padStart(2, "0")} · {e.summary}
-                    </strong>
+                    <strong>The adventure begins</strong>
                   </span>
-                </button>
-              ))}
+                </li>
+                {snapshot.events.slice(-6).map((e) => (
+                  <li className="timeline-item" key={e.id}>
+                    <i />
+                    <span>
+                      <strong>
+                        {String(e.revision).padStart(2, "0")} · {e.summary}
+                      </strong>
+                    </span>
+                  </li>
+                ))}
+              </ol>
             </div>
             {snapshot.proposals
               .filter((p) => p.status === "pending")

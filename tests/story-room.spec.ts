@@ -690,3 +690,27 @@ test.describe("on a touch phone", () => {
     await expect(fox).toHaveAttribute("data-reaction-count", "1");
   });
 });
+
+test("Story Moments is a read-only log: clicking a moment changes nothing", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await mockEdit(page, {
+    name: "Bridge",
+    properties: ["carries"],
+    idPrefix: "bridge",
+  });
+  await mockJev(page, "crosses");
+  await startRoom(page);
+  await drawOnStory(page);
+  const moments = page.locator(".moments-card");
+  const crossed = moments.getByText(/02 · Bridge: a way across/);
+  await expect(crossed).toBeVisible({ timeout: MOMENT_TIMEOUT });
+  await expect(moments.getByRole("button")).toHaveCount(0);
+  const revision = await page.getByText(/^Revision \d+$/).textContent();
+  await moments.getByText(/00 · /).click();
+  await moments.getByText(/01 · Bridge added/).click();
+  await expect(page.getByText(/^Revision \d+$/)).toHaveText(revision!);
+  await expect(page.locator('[data-entity-id="bridge-1"]')).toHaveCount(1);
+  await expect(page.getByText("Route opened", { exact: true })).toBeVisible();
+});

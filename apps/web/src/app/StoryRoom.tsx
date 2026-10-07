@@ -393,22 +393,19 @@ export function StoryRoom({ worldId }: { worldId: string }) {
             </div>
             <div className="moments-card">
               <h2>Story Moments</h2>
-              {snapshot.events.map((event) => (
-                <button
-                  className="timeline-item"
-                  key={event.id}
-                  disabled={busy || contributor}
-                  onClick={() => void run(() => client!.rewind(event.revision))}
-                >
-                  <i />
-                  <span>
-                    <strong>
-                      {String(event.revision).padStart(2, "0")} ·{" "}
-                      {event.summary}
-                    </strong>
-                  </span>
-                </button>
-              ))}
+              <ol className="timeline">
+                {snapshot.events.map((event) => (
+                  <li className="timeline-item" key={event.id}>
+                    <i />
+                    <span>
+                      <strong>
+                        {String(event.revision).padStart(2, "0")} ·{" "}
+                        {event.summary}
+                      </strong>
+                    </span>
+                  </li>
+                ))}
+              </ol>
             </div>
             {snapshot.proposals
               .filter((proposal) => proposal.status === "pending")

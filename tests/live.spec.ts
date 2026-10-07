@@ -52,10 +52,7 @@ test("live director and contributor synchronize an approved bridge", async ({
     await expect(
       b.getByText("Route opened", { exact: false }).first(),
     ).toBeVisible();
-    await a
-      .getByRole("button", { name: /The adventure begins/ })
-      .first()
-      .click();
+    await a.getByRole("button", { name: "Reset world" }).click();
     await expect(a.getByText("River blocks the route")).toBeVisible();
     await expect(b.getByText("River blocks the route")).toBeVisible();
   } finally {
