@@ -18,6 +18,7 @@ import { KeepsakeButton } from "../features/keepsake/KeepsakeButton";
 import { DrawingCanvas } from "../features/canvas/DrawingCanvas";
 import { useDirectedStorySequence } from "./use-directed-story-sequence";
 import { useStoryDrawing } from "./use-story-drawing";
+import { routeLabel } from "./route-label";
 
 const emptySnapshot: ClientSnapshot = {
   status: "ready",
@@ -246,11 +247,7 @@ export function StoryRoom({ worldId }: { worldId: string }) {
                 {drawMode ? "Done drawing" : "Draw something new"}
               </button>
               <span className="world-status">
-                {world.pathStatus === "available"
-                  ? "Route opened"
-                  : world.pathStatus === "blocked"
-                    ? "River blocks the route"
-                    : "No route yet"}
+                {routeLabel(world.pathStatus)}
               </span>
             </div>
             <div className="paper room-paper" ref={paper}>

@@ -61,7 +61,7 @@ hackathon foundation; rooms separate edits, not confidential data.
 
 ## What is implemented
 
-- Typed world operations, entities with a role and properties (`SCHEMA_VERSION` 3), routes that open only through a committed Jev interaction outcome (`RESOLVE_INTERACTION`; no rule table, no fixture outcome), rain from anything with `weather`, revisions, idempotency, director authorization, guest proposals, event snapshots, reset and restore.
+- Typed world operations, entities with a role and properties (`SCHEMA_VERSION` 4), free play when a picture has a character but no place to reach (`pathStatus` `free_play`, no odds), routes that open only through a committed Jev interaction outcome (`RESOLVE_INTERACTION`; no rule table, no fixture outcome), rain from anything with `weather`, revisions, idempotency, director authorization, guest proposals, event snapshots, reset and restore.
 - Opening Story Room after **Start my story**: the drawing lies flat, then its pieces lift off together, shake and land (about 3 to 4 s; a fade under reduced motion) before the opening narration. Reloading or joining as a guest shows the pieces already standing.
 - Drawing mid-story in Story Room: a wobbling cutout at once, then Gemini (or the fixture) reads it, it commits with the child's strokes as its cutout and gets a short lift-off of its own, and `/api/interactions` asks Jev what happens. Without `JEV_STORYWORLD_KEY` the drawing is still added and the room says interactions need Jev.
 - React shell, Konva stroke input, Pixi procedural scene, same-origin API proxy, mobile route, fixture/live adapters.

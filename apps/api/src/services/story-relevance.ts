@@ -60,6 +60,19 @@ export function storyBeatsMatchEventDelta(
   )
     return false;
 
+  // Free play has no route, so nothing stops the character, trips it up or
+  // has to be flown over.
+  if (
+    current.pathStatus === "free_play" &&
+    actions.some(
+      (action) =>
+        action.type === "blocked_by" ||
+        action.type === "splash" ||
+        action.type === "fly_over",
+    )
+  )
+    return false;
+
   if (!previous) return true;
 
   // A freshly resolved interaction must show the drawing that acted or the

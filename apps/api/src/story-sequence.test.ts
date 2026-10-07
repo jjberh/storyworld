@@ -5,6 +5,7 @@ import {
   initialWorld,
   summarize,
 } from "@storyworld/contracts/simulation";
+import { worldFromScene } from "@storyworld/contracts/scene";
 import { buildApp } from "./app";
 import {
   cacheStoryDirector,
@@ -1219,6 +1220,273 @@ describe("live Gemini story director", () => {
       expect(response.body).not.toContain("injected-id");
     } finally {
       await app.close();
+    }
+  });
+});
+
+/** Fox, a tree beside Fox and a sun in the sky: a picture with no goal. */
+function freePlayWorld(): WorldState {
+  const object = (
+    id: string,
+    role: "character" | "scenery",
+    imageBounds: { x: number; y: number; width: number; height: number },
+    properties: ("moves" | "weather")[] = [],
+  ) => ({
+    id,
+    name: id[0]!.toUpperCase() + id.slice(1),
+    role,
+    description: "",
+    properties,
+    confidence: 1,
+    imageBounds,
+  });
+  return worldFromScene("free-world", {
+    document: {
+      sourceImage: "picture",
+      drawing: { strokes: [], compositeImage: "picture" },
+    },
+    mode: "live",
+    objects: [
+      object("fox", "character", { x: 0.1, y: 0.5, width: 0.15, height: 0.3 }, [
+        "moves",
+      ]),
+      object("tree", "scenery", { x: 0.5, y: 0.4, width: 0.2, height: 0.45 }),
+      object("sun", "scenery", { x: 0.8, y: 0.02, width: 0.12, height: 0.18 }),
+    ],
+    characterId: "fox",
+    openingNarration: "Fox explores.",
+    moodHints: ["curious"],
+  });
+}
+
+function drawInto(
+  world: WorldState,
+  id: string,
+  properties: ("scares" | "carries" | "shelters")[] = [],
+  bounds = { x: 300, y: 330, width: 80, height: 80 },
+) {
+  return applyOperation(world, {
+    type: "CREATE_ENTITY",
+    entity: {
+      id,
+      role: "helper",
+      name: id[0]!.toUpperCase() + id.slice(1),
+      description: "",
+      properties,
+      bounds,
+    },
+  });
+}
+
+describe("free play story director", () => {
+  const types = (body: { beats: { action: { type: string } }[] }) =>
+    body.beats.map((beat) => beat.action.type);
+
+  it("opens by exploring the picture, never heading for a goal", async () => {
+    const world = freePlayWorld();
+    expect(world.pathStatus).toBe("free_play");
+    const app = buildApp();
+    try {
+      const response = await sequence(
+        app,
+        requestFor(world, "Scene initialized", {
+          openingNarration: "Fox explores.",
+        }),
+      );
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.beats[0]).toMatchObject({
+        narration: "Fox explores.",
+        action: { type: "focus", entityId: "fox" },
+      });
+      // Fox walks to the tree on its ground, not up to the sun.
+      expect(body.beats[1]).toMatchObject({
+        narration: "Fox wanders over to Tree.",
+        action: { type: "move_toward", entityId: "fox", targetId: "tree" },
+      });
+      expect(body.beats).toHaveLength(2);
+      expect(JSON.stringify(body)).not.toMatch(/route|in the way|blocked/i);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("notices a new drawing, then plays with it after its outcome", async () => {
+    const world = freePlayWorld();
+    const added = drawInto(world, "ball");
+    const played = applyOperation(added, {
+      type: "RESOLVE_INTERACTION",
+      entityId: "ball",
+      outcome: "nothing_happens",
+      odds: null,
+      confidence: 0.8,
+      obstacleId: null,
+    });
+    expect(played.pathStatus).toBe("free_play");
+    const app = buildApp();
+    try {
+      const addition = await sequence(
+        app,
+        requestFor(added, "Ball added", {}, world),
+      );
+      expect(addition.statusCode).toBe(200);
+      expect(addition.json().beats).toEqual([
+        expect.objectContaining({
+          action: { type: "reveal", entityId: "ball" },
+        }),
+        expect.objectContaining({
+          narration: "Fox spots Ball!",
+          action: {
+            type: "react",
+            entityId: "fox",
+            causeId: "ball",
+            reaction: "surprised",
+          },
+        }),
+      ]);
+      const moment = await sequence(
+        app,
+        requestFor(played, "Ball: a new friend", {}, added),
+      );
+      expect(moment.statusCode).toBe(200);
+      expect(types(moment.json())).toEqual([
+        "react",
+        "move_toward",
+        "celebrate",
+      ]);
+      expect(moment.json().beats[1].action).toEqual({
+        type: "move_toward",
+        entityId: "fox",
+        targetId: "ball",
+      });
+      expect(moment.json().beats[2].narration).toBe(
+        "Fox and Ball play together!",
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("does not walk up into the sky, and still scares and shelters", async () => {
+    const world = freePlayWorld();
+    const cases = [
+      [
+        "star",
+        [],
+        "nothing_happens",
+        ["react", "celebrate"],
+        { x: 600, y: 10, width: 60, height: 60 },
+      ],
+      [
+        "ghost",
+        ["scares"],
+        "scared",
+        ["react"],
+        { x: 300, y: 330, width: 80, height: 80 },
+      ],
+      [
+        "tent",
+        ["shelters"],
+        "sheltered",
+        ["react"],
+        { x: 300, y: 330, width: 80, height: 80 },
+      ],
+    ] as const;
+    const app = buildApp();
+    try {
+      for (const [id, properties, outcome, expected, bounds] of cases) {
+        const added = drawInto(world, id, [...properties], bounds);
+        const played = applyOperation(added, {
+          type: "RESOLVE_INTERACTION",
+          entityId: id,
+          outcome,
+          odds: null,
+          confidence: 0.7,
+          obstacleId: null,
+        });
+        const response = await sequence(
+          app,
+          requestFor(played, "Outcome", {}, added),
+        );
+        expect(response.statusCode, outcome).toBe(200);
+        expect(types(response.json()), outcome).toEqual(expected);
+        expect(JSON.stringify(response.json())).toContain(`"${id}"`);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects a live sequence that stops the character in free play", async () => {
+    const world = freePlayWorld();
+    // A blocker in a picture with no goal is not in anyone's way.
+    const added = applyOperation(world, {
+      type: "CREATE_ENTITY",
+      entity: {
+        id: "wall",
+        role: "obstacle",
+        name: "Wall",
+        description: "",
+        properties: ["blocks"],
+        bounds: { x: 300, y: 300, width: 40, height: 200 },
+      },
+    });
+    expect(added.pathStatus).toBe("free_play");
+    const director = (beats: object[]) =>
+      buildApp({
+        storyDirector: { mode: "live", direct: async () => beats as never },
+      });
+    const blocked = director([
+      {
+        narration: "The wall appears.",
+        mood: "curious",
+        action: { type: "reveal", entityId: "wall" },
+      },
+      {
+        narration: "The wall stops Fox.",
+        mood: "worried",
+        action: { type: "blocked_by", entityId: "fox", obstacleId: "wall" },
+      },
+    ]);
+    const playful = director([
+      {
+        narration: "A wall pops up.",
+        mood: "curious",
+        action: { type: "reveal", entityId: "wall" },
+      },
+      {
+        narration: "Fox runs over to the wall.",
+        mood: "delighted",
+        action: { type: "move_toward", entityId: "fox", targetId: "wall" },
+      },
+      {
+        narration: "Fox loves it!",
+        mood: "delighted",
+        action: { type: "celebrate", entityId: "fox" },
+      },
+    ]);
+    const unrelated = director([
+      {
+        narration: "Fox looks at the tree.",
+        mood: "curious",
+        action: { type: "move_toward", entityId: "fox", targetId: "tree" },
+      },
+    ]);
+    try {
+      const payload = requestFor(added, "Wall added", {}, world);
+      expect((await sequence(blocked, payload)).statusCode).toBe(502);
+      expect((await sequence(unrelated, payload)).statusCode).toBe(502);
+      const accepted = await sequence(playful, payload);
+      expect(accepted.statusCode).toBe(200);
+      expect(types(accepted.json())).toEqual([
+        "reveal",
+        "move_toward",
+        "celebrate",
+      ]);
+    } finally {
+      await blocked.close();
+      await playful.close();
+      await unrelated.close();
     }
   });
 });

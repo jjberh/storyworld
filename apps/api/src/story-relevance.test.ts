@@ -298,3 +298,73 @@ describe("story relevance for the richer actions", () => {
     ).toBe(false);
   });
 });
+
+describe("free play relevance", () => {
+  // Nova's world without the castle: free play, the river still drawn.
+  const noGoal = applyOperation(start, {
+    type: "REMOVE_ENTITY",
+    entityId: "castle",
+  });
+  const kiteAdded = applyOperation(noGoal, {
+    type: "CREATE_ENTITY",
+    entity: {
+      id: "kite",
+      role: "helper",
+      name: "Kite",
+      description: "",
+      properties: ["flies"],
+      bounds: { x: 250, y: 300, width: 60, height: 60 },
+    },
+  });
+  const kitePlayed = applyOperation(kiteAdded, {
+    type: "RESOLVE_INTERACTION",
+    entityId: "kite",
+    outcome: "nothing_happens",
+    odds: null,
+    confidence: 0.8,
+    obstacleId: null,
+  });
+
+  it("accepts playing with the new drawing", () => {
+    expect(kitePlayed.pathStatus).toBe("free_play");
+    expect(
+      matches(
+        [
+          {
+            type: "react",
+            entityId: "nova",
+            causeId: "kite",
+            reaction: "happy",
+          },
+          { type: "move_toward", entityId: "nova", targetId: "kite" },
+          { type: "celebrate", entityId: "nova" },
+        ],
+        kitePlayed,
+        kiteAdded,
+      ),
+    ).toBe(true);
+    expect(
+      matches([{ type: "reveal", entityId: "kite" }], kiteAdded, noGoal),
+    ).toBe(true);
+  });
+
+  it("rejects beats that ignore the moment or put something in the way", () => {
+    expect(
+      matches([{ type: "focus", entityId: "river" }], kitePlayed, kiteAdded),
+    ).toBe(false);
+    expect(
+      matches([{ type: "focus", entityId: "river" }], kiteAdded, noGoal),
+    ).toBe(false);
+    for (const type of ["blocked_by", "splash", "fly_over"] as const)
+      expect(
+        matches(
+          [
+            { type: "focus", entityId: "kite" },
+            { type, entityId: "nova", obstacleId: "river" },
+          ],
+          kitePlayed,
+          kiteAdded,
+        ),
+      ).toBe(false);
+  });
+});

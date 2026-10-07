@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { initialWorld, applyOperation, summarize } from "./simulation";
+import {
+  initialWorld,
+  applyOperation,
+  deriveWorld,
+  summarize,
+} from "./simulation";
 import { initialSceneResponseSchema } from "./index";
 import type { Entity, InteractionOutcome, WorldOperation } from "./model";
 import { operationSchema, worldStateSchema } from "./world-schema";
@@ -18,11 +23,12 @@ const resolve = (
   outcome: InteractionOutcome,
   entityId = "bridge",
   obstacleId: string | null = "river",
+  odds: number | null = 0.8,
 ): WorldOperation => ({
   type: "RESOLVE_INTERACTION",
   entityId,
   outcome,
-  odds: 0.8,
+  odds,
   confidence: 0.9,
   obstacleId,
 });
@@ -122,12 +128,73 @@ describe("world causality", () => {
     expect(() =>
       applyOperation(added, { ...resolve("crosses"), odds: 1.5 } as never),
     ).toThrow("odds");
-    // Without a goal there is nowhere to cross to, but a reaction still fits.
+    // Without a goal there is nowhere to cross to, but a reaction still fits
+    // (with no odds: there is no goal to give odds for).
     const noGoal = { ...added, goal: null };
     expect(() => applyOperation(noGoal, resolve("crosses"))).toThrow("goal");
     expect(
-      applyOperation(noGoal, resolve("scared", "bridge", null)).pathStatus,
+      applyOperation(noGoal, resolve("scared", "bridge", null, null))
+        .pathStatus,
+    ).toBe("free_play");
+  });
+  it("takes odds exactly when there is a goal", () => {
+    const added = applyOperation(initialWorld("test"), bridge(400, 160));
+    expect(() =>
+      applyOperation(added, resolve("crosses", "bridge", "river", null)),
+    ).toThrow("needs odds");
+    const noGoal = { ...added, goal: null };
+    expect(() =>
+      applyOperation(noGoal, resolve("nothing_happens", "bridge", null)),
+    ).toThrow("no goal to give odds for");
+    const played = applyOperation(
+      noGoal,
+      resolve("nothing_happens", "bridge", null, null),
+    );
+    expect(played.interaction).toMatchObject({
+      outcome: "nothing_happens",
+      odds: null,
+      obstacleId: null,
+    });
+    expect(played.crossings).toEqual([]);
+    expect(worldStateSchema.parse(played)).toEqual(played);
+    expect(() =>
+      applyOperation(noGoal, {
+        ...resolve("scared", "bridge", null),
+        odds: undefined,
+      } as never),
+    ).toThrow("odds");
+  });
+  it("is in free play with a character and no goal, idle with no character", () => {
+    const world = initialWorld("test");
+    const noGoal = deriveWorld({ ...world, goal: null });
+    expect(noGoal.pathStatus).toBe("free_play");
+    // A blocker in the picture is not in anyone's way without a route.
+    expect(noGoal.entities.some((entity) => entity.id === "river")).toBe(true);
+    expect(
+      deriveWorld({
+        ...noGoal,
+        entities: noGoal.entities.filter(
+          (entity) => entity.role !== "character",
+        ),
+      }).pathStatus,
     ).toBe("idle");
+    // Removing the place to reach turns the story into free play.
+    const removed = applyOperation(world, {
+      type: "REMOVE_ENTITY",
+      entityId: "castle",
+    });
+    expect(removed.goal).toBeNull();
+    expect(removed.pathStatus).toBe("free_play");
+    // Crossing and funny misses need a route; reactions still fit.
+    const added = applyOperation(noGoal, bridge(400, 160));
+    for (const outcome of ["crosses", "almost", "splash", "blocked"] as const)
+      expect(() =>
+        applyOperation(added, resolve(outcome, "bridge", null, null)),
+      ).toThrow("goal");
+    // The character itself never resolves an interaction.
+    expect(() =>
+      applyOperation(added, resolve("nothing_happens", "nova", null, null)),
+    ).toThrow("character");
   });
   it("resolves each drawing only once", () => {
     const crossed = bridgedWith("crosses");
@@ -379,7 +446,7 @@ describe("property-based world rules", () => {
     const splashed = applyOperation(added, resolve("splash"));
     expect(summarize(resolve("splash"), splashed)).toBe("Bridge: splash!");
     const noGoal = { ...added, goal: null };
-    const scared = resolve("scared", "bridge", null);
+    const scared = resolve("scared", "bridge", null, null);
     expect(summarize(scared, applyOperation(noGoal, scared))).toBe(
       "Bridge: a big scare",
     );

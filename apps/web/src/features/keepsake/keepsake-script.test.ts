@@ -369,6 +369,49 @@ describe("buildKeepsakeScript", () => {
         }
   });
 
+  it("finds the best free-play moment and its hero without a goal", () => {
+    const freePlay = (source: WorldEvent): WorldEvent => ({
+      ...source,
+      state: {
+        ...source.state,
+        goal: null,
+        pathStatus: "free_play",
+        crossings: [],
+      },
+    });
+    const start = freePlay(event(0, [fox, cloud]));
+    const added = freePlay(event(1, [fox, cloud, bridge]));
+    const played = freePlay(event(2, [fox, cloud, bridge]));
+    const script = buildKeepsakeScript({
+      events: [start, added, played],
+      sequences: sequences(
+        sequence(start, [{ type: "focus", entityId: "fox" }]),
+        sequence(added, [
+          { type: "reveal", entityId: "bridge" },
+          {
+            type: "react",
+            entityId: "fox",
+            causeId: "bridge",
+            reaction: "surprised",
+          },
+        ]),
+        sequence(played, [
+          {
+            type: "react",
+            entityId: "fox",
+            causeId: "bridge",
+            reaction: "happy",
+          },
+          { type: "move_toward", entityId: "fox", targetId: "bridge" },
+          { type: "celebrate", entityId: "fox" },
+        ]),
+      ),
+    })!;
+    expect(script.momentEventId).toBe(played.id);
+    expect(script.heroName).toBe("Fox");
+    expect(script.title).toBe("Fox's story");
+  });
+
   it("names the movie after the hero", () => {
     expect(movieTitle("Nova")).toBe("Nova's story");
     expect(movieTitle(undefined)).toBe("Our Storyworld story");

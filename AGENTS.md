@@ -24,6 +24,7 @@ Drawing → `POST /api/interpret/scene` or `/edit` (Gemini, or fixture without a
 - The renderer changes permanent world state only after a committed database event.
 - Without a key, provider routes return deterministic responses labelled `"mode": "fixture"`. With a key, provider failures return a typed error (`PROVIDER_TIMEOUT`, `INVALID_MODEL_OUTPUT`, …) and never fall back to fixture.
 - The interaction resolver uses Jev only (`JEV_STORYWORLD_KEY`, server-only). There is no rule table or fixture fallback: without a key the route returns `PROVIDER_NOT_CONFIGURED` and drawings are still added without an outcome. An obstacle across the route is passed only through a committed `RESOLVE_INTERACTION` success: never from a drawing's geometry, and it cannot be removed (rewind and reset still restore earlier states). Guests and models can never propose an outcome.
+- A goal is optional. With a character and no goal the world is in free play (`pathStatus: "free_play"`): Jev is asked only what happens (no odds, `odds: null`), and route outcomes never apply.
 
 ## Modes
 

@@ -5,12 +5,18 @@ import {
   type Entity,
   type InteractionOutcome,
 } from "./model";
-import { blockingObstacle, makesRain, routeBlockers } from "./entity-traits";
+import {
+  blockingObstacle,
+  hasReachableGoal,
+  makesRain,
+  routeBlockers,
+} from "./entity-traits";
 import {
   interactionObstacle,
   interactionProblem,
   opensRoute,
   removalProblem,
+  storyCharacter,
 } from "./interaction";
 export function initialWorld(id: string): WorldState {
   return {
@@ -76,21 +82,19 @@ function validateEntity(e: Entity) {
 /**
  * Route and weather from committed facts: the route is open once every
  * obstacle across it has a committed crossing (see RESOLVE_INTERACTION), and
- * anything with `weather` brings rain.
+ * anything with `weather` brings rain. A character with no goal is in free
+ * play: there is no route to open or block.
  */
 export function deriveWorld(state: WorldState): WorldState {
-  const character = state.entities.find(
-    (e) => e.id === state.goal?.characterId,
-  );
-  const target = state.entities.find((e) => e.id === state.goal?.targetId);
   return {
     ...state,
-    pathStatus:
-      !character || !target
-        ? "idle"
-        : routeBlockers(state).length > 0
-          ? "blocked"
-          : "available",
+    pathStatus: hasReachableGoal(state)
+      ? routeBlockers(state).length > 0
+        ? "blocked"
+        : "available"
+      : storyCharacter(state)
+        ? "free_play"
+        : "idle",
     weather: state.entities.some(makesRain) ? "rain" : "clear",
   };
 }
@@ -163,14 +167,27 @@ export function applyOperation(
       next.goal = { characterId: op.characterId, targetId: op.targetId };
       break;
     case "RESOLVE_INTERACTION": {
+      const probability = (value: unknown) =>
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        value >= 0 &&
+        value <= 1;
       if (
-        ![op.odds, op.confidence].every(
-          (value) => Number.isFinite(value) && value >= 0 && value <= 1,
-        )
+        !probability(op.confidence) ||
+        (op.odds !== null && !probability(op.odds))
       )
         throw new Error("Invalid interaction odds.");
       const problem = interactionProblem(state, op.entityId, op.outcome);
       if (problem) throw new Error(problem);
+      // Odds are Jev's answer to "how likely is the goal now?", so they come
+      // exactly when there is a goal. A mismatch means the goal changed
+      // after Jev was asked.
+      if ((op.odds === null) === hasReachableGoal(state))
+        throw new Error(
+          op.odds === null
+            ? "The world changed before this moment could play: it needs odds for its goal."
+            : "The world changed before this moment could play: there is no goal to give odds for.",
+        );
       const actor = state.entities.find((entity) => entity.id === op.entityId)!;
       if (actor.outcome)
         throw new Error("That drawing's moment has already happened.");

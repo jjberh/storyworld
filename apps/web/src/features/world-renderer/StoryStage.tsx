@@ -207,7 +207,11 @@ export function StoryStage({
       <div
         className="paper-theater-stage"
         role="img"
-        aria-label={`Living paper theater. The route is ${world.pathStatus}.`}
+        aria-label={
+          world.pathStatus === "free_play"
+            ? "Living paper theater. Free play."
+            : `Living paper theater. The route is ${world.pathStatus}.`
+        }
         data-action={snapshot.action}
         data-intro={snapshot.intro}
         data-motion={renderer?.reducedMotion ? "reduced" : "full"}

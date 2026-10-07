@@ -156,10 +156,14 @@ describe("interaction resolver", () => {
   });
 
   it("rejects an answer with no fitting outcome or an unknown shape", async () => {
+    const withoutOdds = jevAnswer("crosses") as { answers: { odds?: unknown } };
+    delete withoutOdds.answers.odds;
     for (const body of [
       jevAnswer("flies_over", { flies_over: 1 }),
       jevAnswer("teleports"),
       { answers: { outcome: { type: "score" } } },
+      // A world with a goal needs Jev's odds.
+      withoutOdds,
       "not json at all",
     ]) {
       const fetchImpl = vi.fn(async () =>
@@ -436,6 +440,184 @@ describe("POST /api/interactions", () => {
         outcome: "rides_across",
         actorId: "bridge-1",
       });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("interaction resolver in free play", () => {
+  /** Nova's world after the castle is gone: no goal, the river still drawn. */
+  function freePlayWith(entity: Partial<Entity> = {}): WorldState {
+    const noGoal = applyOperation(initialWorld("jev"), {
+      type: "REMOVE_ENTITY",
+      entityId: "castle",
+    });
+    return applyOperation(noGoal, {
+      type: "CREATE_ENTITY",
+      entity: {
+        id: "dragon-1",
+        role: "helper",
+        name: "Dragon",
+        description: "A big green dragon.",
+        properties: ["flies", "carries"],
+        bounds: { x: 600, y: 200, width: 160, height: 120 },
+        ...entity,
+      },
+    });
+  }
+
+  function freePlayAnswer(
+    choice: string,
+    probabilities: Record<string, number> = { [choice]: 1 },
+  ) {
+    const answer = jevAnswer(choice, probabilities) as {
+      answers: { odds?: unknown };
+    };
+    delete answer.answers.odds;
+    return answer;
+  }
+
+  it("asks only what happens, from the outcomes that fit, and returns no odds", async () => {
+    const world = freePlayWith();
+    expect(world.pathStatus).toBe("free_play");
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(freePlayAnswer("nothing_happens")),
+    );
+    const { resolver } = resolverWith(fetchImpl as unknown as typeof fetch);
+    const result = await resolver.resolve({ world, entityId: "dragon-1" });
+    expect(result).toEqual({
+      mode: "live",
+      outcome: "nothing_happens",
+      odds: null,
+      confidence: 0.82,
+      actorId: "dragon-1",
+      characterId: "nova",
+      obstacleId: null,
+    });
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    const body = JSON.parse(String(init.body));
+    // The Score question ("how likely to reach the goal") is not sent.
+    expect(Object.keys(body.questions)).toEqual(["outcome"]);
+    expect(body.questions.odds).toBeUndefined();
+    expect(body.questions.outcome.type).toBe("choice");
+    expect(body.questions.outcome.instructions.question).toMatch(
+      /free to play/,
+    );
+    // Nothing shelters here, and nothing can cross or miss without a route.
+    expect(Object.keys(body.questions.outcome.criteria).sort()).toEqual([
+      "nothing_happens",
+      "scared",
+    ]);
+    for (const text of Object.values(body.questions.outcome.criteria))
+      expect(String(text).length).toBeLessThanOrEqual(255);
+    expect(body.state.goal).toBeNull();
+    expect(body.state.route.status).toMatch(/^none/);
+    expect(body.state.route.obstacle).toBeNull();
+  });
+
+  it("offers shelter when something shelters, and keeps Jev's pick in bounds", async () => {
+    const tent = applyOperation(freePlayWith(), {
+      type: "CREATE_ENTITY",
+      entity: {
+        id: "tent",
+        role: "helper",
+        name: "Tent",
+        description: "",
+        properties: ["shelters"],
+        bounds: { x: 100, y: 400, width: 100, height: 100 },
+      },
+    });
+    // Jev's top pick needs a route, so its most probable fitting one is used.
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(
+        freePlayAnswer("flies_over", {
+          flies_over: 0.6,
+          scared: 0.3,
+          nothing_happens: 0.1,
+        }),
+      ),
+    );
+    const { resolver } = resolverWith(fetchImpl as unknown as typeof fetch);
+    const result = await resolver.resolve({
+      world: tent,
+      entityId: "dragon-1",
+    });
+    expect(result).toMatchObject({ outcome: "scared", odds: null });
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(
+      Object.keys(JSON.parse(String(init.body)).questions.outcome.criteria),
+    ).toEqual(["nothing_happens", "scared", "sheltered"]);
+  });
+
+  it("does not ask Jev when there is no choice to make", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(freePlayAnswer("nothing_happens")),
+    );
+    const { resolver } = resolverWith(fetchImpl as unknown as typeof fetch);
+    // The hero itself, and a world with nobody left to react.
+    const world = freePlayWith();
+    const heroless = applyOperation(world, {
+      type: "REMOVE_ENTITY",
+      entityId: "nova",
+    });
+    expect(heroless.pathStatus).toBe("idle");
+    // Without a character there is nobody free to play.
+    expect(interactionState(heroless, "dragon-1").route.status).toBe(
+      "none: there is no character in the story yet",
+    );
+    for (const [input, entityId] of [
+      [world, "nova"],
+      [heroless, "dragon-1"],
+    ] as const) {
+      const error = await errorOf(resolver.resolve({ world: input, entityId }));
+      expect(error).toMatchObject({
+        statusCode: 422,
+        code: "NOTHING_TO_DECIDE",
+      });
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("commits through the route with null odds", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(jevAnswer("nothing_happens")),
+    );
+    const app = buildApp({
+      interactionResolver: createInteractionResolver(
+        { JEV_STORYWORLD_KEY: KEY },
+        fetchImpl as unknown as typeof fetch,
+      ),
+    });
+    try {
+      const world = freePlayWith();
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/interactions",
+        payload: { world, entityId: "dragon-1" },
+      });
+      expect(response.statusCode).toBe(200);
+      // Odds Jev volunteers anyway are not used: there is no goal.
+      expect(response.json()).toMatchObject({
+        outcome: "nothing_happens",
+        odds: null,
+        obstacleId: null,
+      });
+      const committed = applyOperation(world, {
+        type: "RESOLVE_INTERACTION",
+        entityId: "dragon-1",
+        outcome: response.json().outcome,
+        odds: response.json().odds,
+        confidence: response.json().confidence,
+        obstacleId: response.json().obstacleId,
+      });
+      expect(committed.pathStatus).toBe("free_play");
     } finally {
       await app.close();
     }

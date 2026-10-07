@@ -297,4 +297,72 @@ describe("sequenceFromCommittedEvents", () => {
     expect(sequence?.sourceEventId).toBe(committed.id);
     expect(Object.keys(sequence ?? {})).not.toContain("proposal");
   });
+
+  it("explores in free play instead of heading for a goal", () => {
+    const tree: Entity = {
+      id: "tree",
+      role: "scenery",
+      description: "",
+      properties: [],
+      name: "Tree",
+      bounds: { x: 400, y: 280, width: 120, height: 180 },
+    };
+    const sun: Entity = {
+      id: "sun",
+      role: "scenery",
+      description: "",
+      properties: [],
+      name: "Sun",
+      bounds: { x: 150, y: 20, width: 80, height: 80 },
+    };
+    const opening = state(0, [character, sun, tree], "free_play");
+    expect(opening.goal).toBeNull();
+    const first = sequenceFor(opening);
+    // The hero walks to the tree beside it, not up to the nearer sun.
+    expect(first?.beats.map((item) => item.action)).toEqual([
+      { type: "focus", entityId: "hero" },
+      { type: "move_toward", entityId: "hero", targetId: "tree" },
+    ]);
+    expectValid(first);
+
+    const ball: Entity = {
+      id: "ball",
+      role: "helper",
+      description: "",
+      properties: [],
+      name: "Ball",
+      bounds: { x: 250, y: 320, width: 60, height: 60 },
+    };
+    const added = state(1, [character, sun, tree, ball], "free_play");
+    const addition = sequenceFor(added, opening);
+    expect(addition?.beats.map((item) => item.action.type)).toEqual([
+      "reveal",
+      "react",
+    ]);
+    expectValid(addition);
+
+    const played: WorldState = {
+      ...state(
+        2,
+        [character, sun, tree, { ...ball, outcome: "nothing_happens" }],
+        "free_play",
+      ),
+      interaction: {
+        entityId: "ball",
+        outcome: "nothing_happens",
+        odds: null,
+        confidence: 0.8,
+        obstacleId: null,
+        revision: 2,
+      },
+    };
+    const moment = sequenceFor(played, added);
+    expect(moment?.beats.map((item) => item.action.type)).toEqual([
+      "react",
+      "move_toward",
+      "celebrate",
+    ]);
+    expect(JSON.stringify(moment)).not.toMatch(/route|in the way/i);
+    expectValid(moment);
+  });
 });
