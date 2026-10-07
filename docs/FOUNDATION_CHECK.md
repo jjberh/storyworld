@@ -100,6 +100,7 @@ hackathon foundation; rooms separate edits, not confidential data.
 - Fastify `/api/interpret/edit`: live Gemini interpretation when `GEMINI_API_KEY` is set (schema-validated, recoverable errors), deterministic fixture otherwise. `/api/interpret/scene` turns an uploaded picture into a proposed initial scene. `/api/story/sequence` validates client-supplied current and previous world snapshots, derives one event delta, and returns one to three presentation beats; it does not independently authenticate database provenance. STT/TTS endpoints return explicit 501 until implemented.
 
 Audio, segmentation, arbitrary pathfinding, QR generation, and finished UX are feature work after this checkpoint. Fixture
-rooms are local and do not synchronize. Rewind restores semantic state as a new
-revision and plays one safe bounded paper-stage beat; it does not replay the
+rooms are local and do not synchronize. Story Moments is a read-only log: the
+app has no rewind control (the `rewindWorld` reducer remains), and Reset on the
+Nova page restores the starting state as a new revision. Neither replays the
 whole visual history, historical audio, or raw strokes.
