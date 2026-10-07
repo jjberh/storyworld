@@ -1,5 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
-import { drawOnStory, mockEdit, mockJev, waitForReveal } from "./story-mocks";
+import {
+  drawOnStory,
+  mockEdit,
+  mockJev,
+  MOMENT_TIMEOUT,
+  waitForReveal,
+} from "./story-mocks";
 
 // The Story Room's lift-off reveal: after "Start my story" the confirmed
 // drawing lies flat, the pieces lift off together and land, and only then
@@ -104,6 +110,22 @@ async function openRoom(page: Page, mode: "fixture" | "live" = "fixture") {
   // the canvas checks below can find.
   const canvas = page.locator(".drawing-layer canvas").last();
   await expect(canvas).toBeVisible();
+  // The paper sizes its canvas from a ResizeObserver, a frame or two behind
+  // the page's first layout. Strokes aimed at a box measured before then land
+  // scaled down, outside the castle, so wait until the canvas fills the paper.
+  await expect
+    .poll(() =>
+      canvas.evaluate((element) => {
+        const paper = element.closest(".authoring-paper-wrap")!;
+        const style = getComputedStyle(paper);
+        const inner =
+          paper.clientWidth -
+          parseFloat(style.paddingLeft) -
+          parseFloat(style.paddingRight);
+        return Math.abs(element.getBoundingClientRect().width - inner) < 1;
+      }),
+    )
+    .toBe(true);
   const box = (await canvas.boundingBox())!;
   const at = (x: number, y: number) =>
     [box.x + box.width * x, box.y + box.height * y] as const;
@@ -170,12 +192,21 @@ async function stageClip(page: Page): Promise<Clip> {
   return (await canvas.boundingBox())!;
 }
 
+/** Stage time between canvas samples during the reveal. */
+const SAMPLE_STEP_MS = 150;
+
 /**
  * Samples the castle's ink top until the reveal is done, with the castle's
- * reveal state at each sample.
+ * reveal state at each sample. The page clock (installed before the room
+ * opened) is held and stepped between samples, so each one is a known moment
+ * of the reveal however slowly screenshots come back on a busy machine.
+ * Holding it fires each timer at most once, and the stage advances at most
+ * 100 ms a frame, so the reveal barely moves while it is caught. The clock
+ * runs freely again once the reveal is done.
  */
 async function castleTopsDuringReveal(page: Page) {
   const clip = await stageClip(page);
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
   const samples: { top: number | null; state: string | null }[] = [];
   const castleState = () =>
     page.evaluate(() =>
@@ -189,9 +220,13 @@ async function castleTopsDuringReveal(page: Page) {
     );
   for (let state = await castleState(); state !== undefined;) {
     samples.push({ top: await castleInkTop(page, clip), state });
+    await page.clock.runFor(SAMPLE_STEP_MS);
     state = await castleState();
   }
-  return samples;
+  // Landed, where it started.
+  const rest = await castleInkTop(page, clip);
+  await page.clock.resume();
+  return { samples, rest };
 }
 
 /** The reveal as traced: flat, lifting, landed, then the opening. */
@@ -229,9 +264,12 @@ function expectFullReveal(frames: Frame[]) {
 test("Start my story opens the room with the lift-off reveal, then the opening", async ({
   page,
 }) => {
+  // Canvas samples are slow on a busy machine; the stepped clock waits.
+  test.setTimeout(90_000);
   // Tall enough that the whole stage stays in view for canvas samples.
   await page.setViewportSize({ width: 1280, height: 1400 });
   const trace = await traceStage(page);
+  await page.clock.install();
   await openRoom(page);
   const stage = page.locator(".paper-theater-stage");
   await expect(stage).toHaveAttribute("data-motion", "full");
@@ -239,14 +277,19 @@ test("Start my story opens the room with the lift-off reveal, then the opening",
   await expect(stage).toHaveAttribute("data-intro", "playing");
   await expect(page.getByRole("button", { name: "Tickle Fox" })).toBeDisabled();
   // The castle's ink rises off the paper during the reveal.
-  const samples = await castleTopsDuringReveal(page);
+  const { samples, rest } = await castleTopsDuringReveal(page);
   await waitForReveal(page);
+  // Caught flat on the paper first.
+  expect(samples[0]!.state).toBe("flat");
   const flat = samples[0]!.top!;
   expect(flat).not.toBeNull();
   const lifted = samples.filter((sample) => sample.state === "lifting");
   expect(Math.min(...lifted.map((sample) => sample.top ?? flat))).toBeLessThan(
     flat - 6,
   );
+  // And it lands back where it lay.
+  expect(rest).not.toBeNull();
+  expect(Math.abs(rest! - flat)).toBeLessThanOrEqual(1);
   await expect(page.getByRole("button", { name: "Tickle Fox" })).toBeEnabled();
   // The opening narration plays after the reveal.
   await expect(page.locator(".paper-theater-caption")).not.toHaveText(READY);
@@ -262,6 +305,9 @@ test("Start my story opens the room with the lift-off reveal, then the opening",
 test("a new drawing gets its own short lift-off, and the story goes on", async ({
   page,
 }) => {
+  // The opening, the drawing's moment and Jev's outcome, each a few 2–4 s
+  // beats (slower still on a loaded machine).
+  test.setTimeout(60_000);
   const trace = await traceStage(page);
   await mockEdit(page, {
     name: "Bridge",
@@ -274,7 +320,9 @@ test("a new drawing gets its own short lift-off, and the story goes on", async (
   await drawOnStory(page);
   const bridge = page.locator('[data-entity-id="bridge-1"]');
   await expect(bridge).toHaveAttribute("data-reveal-state", "visible");
-  await expect(page.getByText(/Fox made it across!/)).toBeVisible();
+  await expect(page.getByText(/Fox made it across!/)).toBeVisible({
+    timeout: MOMENT_TIMEOUT,
+  });
   expect(asked).toEqual(["bridge-1"]);
   const frames = await trace();
   const withBridge = frames.filter((frame) => "bridge-1" in frame.states);
@@ -298,23 +346,25 @@ test("a new drawing gets its own short lift-off, and the story goes on", async (
 test("reduced motion fades the pieces in instead of lifting them", async ({
   page,
 }) => {
+  test.setTimeout(90_000);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 1280, height: 1400 });
   const trace = await traceStage(page);
+  await page.clock.install();
   await openRoom(page);
   await expect(page.locator(".paper-theater-stage")).toHaveAttribute(
     "data-motion",
     "reduced",
   );
-  const samples = await castleTopsDuringReveal(page);
+  const { samples, rest } = await castleTopsDuringReveal(page);
   await waitForReveal(page);
   await expect(page.locator(".paper-theater-caption")).not.toHaveText(READY);
   // Same flat → fade → landed order, and the opening after it.
   expectFullReveal(await trace());
   // No rise and no shake: the castle's ink never leaves its resting row,
   // including while it fades in.
-  const rest = await castleInkTop(page, await stageClip(page));
   expect(rest).not.toBeNull();
+  expect(samples[0]!.state).toBe("flat");
   expect(samples.some((sample) => sample.state === "lifting")).toBe(true);
   for (const { top } of samples) {
     expect(top).not.toBeNull();

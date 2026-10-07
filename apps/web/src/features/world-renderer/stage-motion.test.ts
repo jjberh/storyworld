@@ -5,6 +5,7 @@ import {
   approach,
   beatPulse,
   beatPulseDurationMs,
+  beatPulseElapsedMs,
   combinePoses,
   idleMotionFor,
   motionPeriodMs,
@@ -203,16 +204,51 @@ describe("tweens", () => {
     expect(pose.rotation).toBeCloseTo(0.3);
   });
 
-  it("slides an offset from start to end with a soft landing", () => {
+  it("walks an offset from start to end over its whole duration", () => {
     const from = { x: 0, y: 0 };
     const to = { x: 100, y: -50 };
-    expect(tweenOffset(from, to, 0)).toEqual(from);
-    expect(tweenOffset(from, to, 600)).toEqual(to);
-    expect(tweenOffset(from, to, 5000)).toEqual(to);
-    const half = tweenOffset(from, to, 300);
-    expect(half.x).toBeGreaterThan(50);
-    expect(half.x).toBeLessThan(100);
+    expect(tweenOffset(from, to, 0, 2000)).toEqual(from);
+    expect(tweenOffset(from, to, 2000, 2000)).toEqual(to);
+    expect(tweenOffset(from, to, 5000, 2000)).toEqual(to);
+    // A gentle start and a soft landing, half way at the middle.
+    expect(tweenOffset(from, to, 1000, 2000).x).toBeCloseTo(50);
+    expect(tweenOffset(from, to, 1000, 2000).y).toBeCloseTo(-25);
+    const start = tweenOffset(from, to, 200, 2000);
+    expect(start.x).toBeGreaterThan(0);
+    expect(start.x).toBeLessThan(5);
+    const end = tweenOffset(from, to, 1800, 2000);
+    expect(end.x).toBeGreaterThan(95);
+    expect(end.x).toBeLessThan(100);
+    // Every step of the walk moves forward, never back.
+    let last = 0;
+    for (let time = 16; time <= 2000; time += 16) {
+      const { x } = tweenOffset(from, to, time, 2000);
+      expect(x).toBeGreaterThanOrEqual(last);
+      last = x;
+    }
     expect(tweenOffset(from, to, 0, 0)).toEqual(to);
+  });
+
+  it("times a flourish around the journey its beat carries", () => {
+    // Without travel, every flourish plays from the beat's start.
+    for (const type of ["fly_over", "splash", "focus"] as const)
+      expect(beatPulseElapsedMs(type, 300, 0)).toBe(300);
+    // A flight rises and lands across the whole crossing.
+    const flight = beatPulseDurationMs("fly_over");
+    expect(beatPulseElapsedMs("fly_over", 1200, 2400)).toBeCloseTo(flight / 2);
+    expect(beatPulseElapsedMs("fly_over", 2400, 2400)).toBeCloseTo(flight);
+    expect(
+      beatPulse("fly_over", beatPulseElapsedMs("fly_over", 1200, 2400), 100)
+        .pose.dy,
+    ).toBeCloseTo(-30);
+    // A splash or a blocked wobble waits until the piece arrives.
+    expect(
+      beatPulse("splash", beatPulseElapsedMs("splash", 1000, 2100), 100).pose,
+    ).toEqual(RESTING_POSE);
+    expect(beatPulseElapsedMs("splash", 2317, 2100)).toBe(217);
+    expect(beatPulseElapsedMs("blocked_by", 2220, 2100)).toBe(120);
+    // A focus glow or reaction never waits.
+    expect(beatPulseElapsedMs("react", 100, 2100)).toBe(100);
   });
 
   it("approaches a target at a fixed rate without overshooting", () => {

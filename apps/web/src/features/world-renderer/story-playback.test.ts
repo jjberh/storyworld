@@ -1,21 +1,23 @@
 import { describe, expect, it } from "vitest";
 import type { Entity, WorldState } from "@storyworld/contracts/model";
-import type {
-  StoryAction,
-  StorySequence,
+import {
+  storyActionSchema,
+  type StoryAction,
+  type StorySequence,
 } from "@storyworld/contracts/story-beat";
 import {
   BEAT_HOLD_MS,
-  CELEBRATE_EXTRA_MS,
-  REDUCED_MOTION_BEAT_HOLD_MS,
-  TRAVEL_EXTRA_MS,
+  MAX_BEAT_HOLD_MS,
+  MIN_BEAT_HOLD_MS,
   beatHoldMs,
   beatMovement,
+  beatTravelMs,
   logicalX,
   movementFor,
   pendingRevealId,
   restingRain,
 } from "./story-playback";
+import { beatPulseDurationMs } from "./stage-motion";
 
 const fox: Entity = {
   id: "fox",
@@ -350,34 +352,80 @@ describe("beatMovement", () => {
 });
 
 describe("beat timing and resting state", () => {
-  it("holds each beat, longer for a celebration, briefly under reduced motion", () => {
-    expect(beatHoldMs({ type: "focus", entityId: "fox" }, false)).toBe(
-      BEAT_HOLD_MS,
-    );
-    expect(beatHoldMs({ type: "celebrate", entityId: "fox" }, false)).toBe(
-      BEAT_HOLD_MS + CELEBRATE_EXTRA_MS,
-    );
-    expect(beatHoldMs({ type: "celebrate", entityId: "fox" }, true)).toBe(
-      REDUCED_MOTION_BEAT_HOLD_MS,
-    );
+  const actionTypes = storyActionSchema.options.map(
+    (option) => option.shape.type.value,
+  );
+
+  it("holds every beat for the plan's 2 to 4 seconds", () => {
+    expect([MIN_BEAT_HOLD_MS, MAX_BEAT_HOLD_MS]).toEqual([2000, 4000]);
+    expect(actionTypes).toHaveLength(11);
+    expect(Object.keys(BEAT_HOLD_MS).sort()).toEqual([...actionTypes].sort());
+    for (const type of actionTypes) {
+      expect(BEAT_HOLD_MS[type]).toBeGreaterThanOrEqual(MIN_BEAT_HOLD_MS);
+      expect(BEAT_HOLD_MS[type]).toBeLessThanOrEqual(MAX_BEAT_HOLD_MS);
+    }
+    // About 2.5 s by default, 2 s for a small beat, 3.5 s to celebrate.
+    expect(BEAT_HOLD_MS.reveal).toBe(2500);
+    expect(BEAT_HOLD_MS.focus).toBe(2000);
+    expect(BEAT_HOLD_MS.celebrate).toBe(3500);
   });
 
-  it("holds travelling beats a little longer so the move can land", () => {
-    for (const action of [
+  it("holds a celebration longest and a focus beat shortest", () => {
+    for (const type of actionTypes) {
+      if (type !== "celebrate")
+        expect(BEAT_HOLD_MS[type]).toBeLessThan(BEAT_HOLD_MS.celebrate);
+      if (type !== "focus")
+        expect(BEAT_HOLD_MS[type]).toBeGreaterThan(BEAT_HOLD_MS.focus);
+    }
+  });
+
+  it("holds travelling beats longer than a plain one so the move can land", () => {
+    for (const type of [
+      "move_toward",
+      "fly_over",
+      "ride",
+      "launch",
+      "splash",
+    ] as const)
+      expect(BEAT_HOLD_MS[type]).toBeGreaterThan(BEAT_HOLD_MS.reveal);
+  });
+
+  it("reads each beat's hold from the table", () => {
+    const actions: StoryAction[] = [
+      { type: "focus", entityId: "fox" },
+      { type: "celebrate", entityId: "fox" },
       { type: "fly_over", entityId: "fox", obstacleId: "river" },
       { type: "ride", entityId: "fox", carrierId: "castle" },
       { type: "launch", entityId: "fox", launcherId: "castle" },
       { type: "splash", entityId: "fox", obstacleId: "river" },
-    ] as const) {
-      expect(beatHoldMs(action, false)).toBe(BEAT_HOLD_MS + TRAVEL_EXTRA_MS);
-      expect(beatHoldMs(action, true)).toBe(REDUCED_MOTION_BEAT_HOLD_MS);
+      { type: "react", entityId: "fox", causeId: "river", reaction: "happy" },
+    ];
+    for (const action of actions)
+      expect(beatHoldMs(action)).toBe(BEAT_HOLD_MS[action.type]);
+  });
+
+  it("paces a move across most of its beat, and not at all under reduced motion", () => {
+    for (const type of actionTypes) {
+      const hold = BEAT_HOLD_MS[type];
+      const travel = beatTravelMs(type, hold, false);
+      // Long enough to watch the walk, landing with time to spare.
+      expect(travel).toBeGreaterThanOrEqual(1500);
+      expect(hold - travel).toBeGreaterThanOrEqual(400);
+      expect(beatTravelMs(type, hold, true)).toBe(0);
     }
-    expect(
-      beatHoldMs(
-        { type: "react", entityId: "fox", causeId: "river", reaction: "happy" },
-        false,
-      ),
-    ).toBe(BEAT_HOLD_MS);
+    expect(beatTravelMs("move_toward", 0, false)).toBe(0);
+  });
+
+  it("leaves an arrival flourish room to finish, even in a recording's shortest beat", () => {
+    // Down to 1400 ms, below the keepsake's 2 s floor.
+    for (const hold of [1400, 2000, BEAT_HOLD_MS.splash])
+      for (const type of ["splash", "blocked_by"] as const) {
+        const travel = beatTravelMs(type, hold, false);
+        expect(travel).toBeGreaterThan(0);
+        expect(hold - travel).toBeGreaterThanOrEqual(beatPulseDurationMs(type));
+      }
+    // Other beats keep the usual pace.
+    expect(beatTravelMs("fly_over", 1400, false)).toBe(1050);
   });
 
   it("shows committed rain unless the sequence presents the weather shift", () => {

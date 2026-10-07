@@ -166,6 +166,9 @@ const {
   KEEPSAKE_INTRO,
   LIVE_INTRO,
 } = await import("./intro-motion");
+const { BEAT_HOLD_MS, beatTravelMs } = await import("./story-playback");
+/** The test sequence's two beats, played through. */
+const SEQUENCE_MS = BEAT_HOLD_MS.move_toward + BEAT_HOLD_MS.blocked_by;
 
 type FakeImage = {
   src: string;
@@ -303,18 +306,29 @@ describe("StoryStageRenderer lifecycle", () => {
 
   it("keeps playing without a canvas when Pixi cannot start", async () => {
     pixi.state.initResult = "reject";
-    const stage = new StoryStageRenderer({
-      scene,
-      world: world(),
-      reducedMotion: true,
-    });
-    await stage.ready;
-    expect(stage.getSnapshot().canvasFailed).toBe(true);
-    await stage.playSequence(sequence, new AbortController().signal);
-    expect(stage.getSnapshot().caption).toBe("River stops the way.");
-    stage.destroy();
-    await flush();
-    expect(pixi.state.apps[0]!.destroy).not.toHaveBeenCalled();
+    vi.useFakeTimers();
+    try {
+      const stage = new StoryStageRenderer({
+        scene,
+        world: world(),
+        reducedMotion: true,
+      });
+      await stage.ready;
+      expect(stage.getSnapshot().canvasFailed).toBe(true);
+      let done = false;
+      void stage
+        .playSequence(sequence, new AbortController().signal)
+        .then(() => (done = true));
+      await vi.advanceTimersByTimeAsync(BEAT_HOLD_MS.move_toward + 100);
+      expect(stage.getSnapshot().caption).toBe("River stops the way.");
+      await vi.advanceTimersByTimeAsync(BEAT_HOLD_MS.blocked_by);
+      expect(done).toBe(true);
+      stage.destroy();
+      await flush();
+      expect(pixi.state.apps[0]!.destroy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("frees every texture it created", async () => {
@@ -338,7 +352,7 @@ describe("StoryStageRenderer playback hand-over", () => {
   async function playThrough(stage: InstanceType<typeof StoryStageRenderer>) {
     const app = pixi.state.apps.at(-1)!;
     const done = stage.playSequence(sequence, new AbortController().signal);
-    for (let frame = 0; frame < 200; frame++) {
+    for (let elapsed = 0; elapsed < SEQUENCE_MS + 200; elapsed += 16) {
       app.tick(16);
       await flush();
     }
@@ -609,13 +623,14 @@ describe("StoryStageRenderer recording features", () => {
     const stage = new StoryStageRenderer({
       scene,
       world: world(),
-      minBeatHoldMs: 1400,
+      minBeatHoldMs: BEAT_HOLD_MS.move_toward + 1000,
     });
     await stage.ready;
     void stage.playSequence(sequence, new AbortController().signal);
-    await run(1000);
+    // Past the live hold, the longer minimum still holds the first beat.
+    await run(BEAT_HOLD_MS.move_toward + 500);
     expect(stage.getSnapshot().caption).toBe("Fox sets off.");
-    await run(500);
+    await run(600);
     expect(stage.getSnapshot().caption).toBe("River stops the way.");
     stage.destroy();
   });
@@ -777,9 +792,11 @@ describe("StoryStageRenderer mid-story drawings", () => {
       new AbortController().signal,
     );
     await run(200);
-    // Still the first beat: it is never cut mid-way.
+    // Still the first beat: it is never cut mid-way, however long it holds.
     expect(stage.getSnapshot().caption).toBe("Fox sets off.");
-    await run(600);
+    await run(BEAT_HOLD_MS.move_toward - 500);
+    expect(stage.getSnapshot().caption).toBe("Fox sets off.");
+    await run(200);
     expect(stage.getSnapshot().caption).toBe("A new drawing arrives.");
     // The stale sequence's remaining beat never played.
     expect(captions.has("River stops the way.")).toBe(false);
@@ -813,7 +830,7 @@ describe("StoryStageRenderer mid-story drawings", () => {
       next("event-3", "Newest moment."),
       new AbortController().signal,
     );
-    await run(900);
+    await run(BEAT_HOLD_MS.move_toward);
     expect(stage.getSnapshot().caption).toBe("Newest moment.");
     expect(captions.has("Older moment.")).toBe(false);
     stage.destroy();
@@ -947,7 +964,9 @@ describe("StoryStageRenderer live lift-off", () => {
     );
     await run(introDurationMs(3, LIVE_INTRO) - 500 + 64);
     expect(stage.getSnapshot().caption).toBe("Fox wakes up.");
-    await run(1500);
+    await run(BEAT_HOLD_MS.focus - 200);
+    expect(stage.getSnapshot().caption).toBe("Fox wakes up.");
+    await run(300);
     expect(stage.getSnapshot().caption).toBe("A bridge appears.");
     stage.destroy();
   });
@@ -1041,7 +1060,7 @@ describe("StoryStageRenderer live lift-off", () => {
     for (let at = 0; at < DRAWING_LIFT.liftMs; at += 16) await frame();
     expect(states(drawn.stage).bridge).toBe("visible");
     expect(drawn.stage.react("bridge")).toBeDefined();
-    for (let index = 0; index < 60; index++) await frame();
+    for (let at = 0; at < BEAT_HOLD_MS.move_toward; at += 16) await frame();
     // The story on stage kept exactly its pace through the lift.
     expect(captions.drawn).toEqual(captions.plain);
     expect(captions.drawn).toContain("River stops the way.");
@@ -1107,5 +1126,178 @@ describe("StoryStageRenderer live lift-off", () => {
     lifting.setWorld(world([fox, river]));
     expect(states(lifting)).toEqual({ fox: "visible", river: "lifting" });
     lifting.destroy();
+  });
+});
+
+describe("StoryStageRenderer beat pacing", () => {
+  type Stage = InstanceType<typeof StoryStageRenderer>;
+  const foxX = (stage: Stage) =>
+    (stage.entityObject("fox") as unknown as { position: { x: number } })
+      .position.x;
+  async function run(milliseconds: number) {
+    const app = pixi.state.apps.at(-1)!;
+    for (let elapsed = 0; elapsed < milliseconds; elapsed += 16) {
+      app.tick(16);
+      await flush();
+    }
+  }
+  const homeX = fox.bounds.x + fox.bounds.width / 2;
+
+  it("walks a moving piece across most of its beat, then lets it stand", async () => {
+    const stage = new StoryStageRenderer({ scene, world: world() });
+    await stage.ready;
+    void stage.playSequence(sequence, new AbortController().signal);
+    await run(16);
+    const targetX = stage
+      .getSnapshot()
+      .entities.find((item) => item.id === "fox")!.centerX;
+    expect(targetX - homeX).toBeGreaterThan(50);
+    const progress = () => (foxX(stage) - homeX) / (targetX - homeX);
+    const travelMs = beatTravelMs(
+      "move_toward",
+      BEAT_HOLD_MS.move_toward,
+      false,
+    );
+    // Idle motion sways a piece by a few world units; allow for it.
+    const sway = 8 / (targetX - homeX);
+    await run(travelMs / 4 - 16);
+    expect(progress()).toBeGreaterThan(0);
+    expect(progress()).toBeLessThan(0.3 + sway);
+    await run(travelMs / 4);
+    expect(progress()).toBeGreaterThan(0.3 - sway);
+    expect(progress()).toBeLessThan(0.7 + sway);
+    // Arrived before the beat ends, with the caption still on stage.
+    await run(travelMs / 2 + 32);
+    expect(Math.abs(progress() - 1)).toBeLessThan(sway);
+    expect(stage.getSnapshot().caption).toBe("Fox sets off.");
+    await run(BEAT_HOLD_MS.move_toward - travelMs);
+    expect(stage.getSnapshot().caption).toBe("River stops the way.");
+    stage.destroy();
+  });
+
+  it("keeps the same holds under reduced motion, without any walking", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world(),
+      reducedMotion: true,
+    });
+    await stage.ready;
+    void stage.playSequence(sequence, new AbortController().signal);
+    await run(16);
+    const targetX = stage
+      .getSnapshot()
+      .entities.find((item) => item.id === "fox")!.centerX;
+    // Straight to its place, no tween.
+    expect(foxX(stage)).toBe(targetX);
+    await run(BEAT_HOLD_MS.move_toward - 100);
+    expect(stage.getSnapshot().caption).toBe("Fox sets off.");
+    await run(200);
+    expect(stage.getSnapshot().caption).toBe("River stops the way.");
+    stage.destroy();
+  });
+
+  it("walks the whole way within a recording's shorter beats", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world(),
+      maxBeatHoldMs: 1400,
+    });
+    await stage.ready;
+    void stage.playSequence(sequence, new AbortController().signal);
+    await run(16);
+    const targetX = stage
+      .getSnapshot()
+      .entities.find((item) => item.id === "fox")!.centerX;
+    await run(1400 - 64);
+    expect(stage.getSnapshot().caption).toBe("Fox sets off.");
+    expect(Math.abs(foxX(stage) - targetX)).toBeLessThan(8);
+    stage.destroy();
+  });
+
+  it("keeps a flyer up in the air for its whole crossing", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      // An open route, so nothing holds the flyer back.
+      world: { ...world(), pathStatus: "available" },
+    });
+    await stage.ready;
+    const flight: StorySequence = {
+      ...sequence,
+      beats: [
+        {
+          id: "beat-1",
+          narration: "Fox swoops over River.",
+          mood: "delighted",
+          action: { type: "fly_over", entityId: "fox", obstacleId: "river" },
+        },
+      ],
+    };
+    void stage.playSequence(flight, new AbortController().signal);
+    const foxY = () =>
+      (stage.entityObject("fox") as unknown as { position: { y: number } })
+        .position.y;
+    const homeY = fox.bounds.y + fox.bounds.height / 2;
+    const travelMs = beatTravelMs("fly_over", BEAT_HOLD_MS.fly_over, false);
+    await run(16);
+    const target = stage
+      .getSnapshot()
+      .entities.find((item) => item.id === "fox")!;
+    // Half way across, long after a one-off flourish would have ended, the
+    // flyer is over the river at the top of its arc: 30% of its height above
+    // the straight line from where it started to where it lands.
+    await run(travelMs / 2 - 16);
+    const x = foxX(stage);
+    expect(x).toBeGreaterThan(river.bounds.x - fox.bounds.width / 2);
+    expect(x).toBeLessThan(
+      river.bounds.x + river.bounds.width + fox.bounds.width / 2,
+    );
+    const along = (x - homeX) / (target.centerX - homeX);
+    const lineY = homeY + (target.centerY - homeY) * along;
+    expect(foxY()).toBeLessThan(lineY - 0.25 * fox.bounds.height);
+    // And it lands with the crossing.
+    await run(travelMs / 2 + 32);
+    expect(Math.abs(foxY() - target.centerY)).toBeLessThan(8);
+    stage.destroy();
+  });
+
+  it("carries on from where a piece is when its walk is cut short", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      // An open route, so nothing holds the flyer back.
+      world: { ...world(), pathStatus: "available" },
+    });
+    await stage.ready;
+    const first = new AbortController();
+    void stage.playSequence(sequence, first.signal);
+    const travelMs = beatTravelMs(
+      "move_toward",
+      BEAT_HOLD_MS.move_toward,
+      false,
+    );
+    await run(travelMs / 2);
+    const before = foxX(stage);
+    expect(before - homeX).toBeGreaterThan(20);
+    first.abort();
+    // A new moment sends the piece somewhere else: it sets off from where it
+    // stood, without a jump.
+    void stage.playSequence(
+      {
+        ...sequence,
+        sourceEventId: "event-2",
+        beats: [
+          {
+            id: "beat-1",
+            narration: "Fox swoops over River.",
+            mood: "delighted",
+            action: { type: "fly_over", entityId: "fox", obstacleId: "river" },
+          },
+        ],
+      },
+      new AbortController().signal,
+    );
+    await run(16);
+    // One frame of walking, a couple of world units at most.
+    expect(Math.abs(foxX(stage) - before)).toBeLessThan(4);
+    stage.destroy();
   });
 });
