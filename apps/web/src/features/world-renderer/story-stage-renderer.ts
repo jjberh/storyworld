@@ -27,11 +27,15 @@ import {
   type IdleMotion,
 } from "./stage-motion";
 import {
+  DRAWING_LIFT,
   introBackdrop,
   introDurationMs,
+  introPieceStartMs,
+  liftOrder,
   RESTING_BACKDROP_ALPHA,
   sampleIntro,
   weightPose,
+  type IntroTiming,
 } from "./intro-motion";
 import {
   beatHoldMs,
@@ -68,7 +72,12 @@ export type StageEntitySnapshot = {
   id: string;
   name: string;
   role: Entity["role"];
-  revealState: "hidden" | "visible";
+  /**
+   * `hidden` waits for its reveal beat; `flat` still lies on the paper
+   * before its lift-off; `lifting` is on its way up (fading in under reduced
+   * motion); `visible` has landed. Only a landed piece reacts to taps.
+   */
+  revealState: "hidden" | "flat" | "lifting" | "visible";
   placement: Placement;
   logicalX: number;
   /** Resting centre in the 1000x600 world, including story movement. */
@@ -88,6 +97,8 @@ export type StageSnapshot = {
   imageStatus: StageImageStatus;
   /** Pixi could not start; the canvas stays blank but playback continues. */
   canvasFailed: boolean;
+  /** The lift-off reveal (`playIntro`) is playing. */
+  intro: "playing" | "done";
   entities: StageEntitySnapshot[];
 };
 
@@ -103,6 +114,11 @@ export type StoryStageOptions = {
    * (for example one recording a story) ignores input.
    */
   interactive?: boolean;
+  /**
+   * A piece that joins the world after the stage opened (a new drawing) gets
+   * its own short lift-off (`DRAWING_LIFT`). Presentation only.
+   */
+  liftNewPieces?: boolean;
   /** Defaults to `window.devicePixelRatio`. */
   resolution?: number;
   /** Initial CSS size of the canvas; defaults to 1000x600. */
@@ -196,6 +212,14 @@ type EntityView = {
 
 type Waiter = { atMs: number; resolve: () => void };
 
+type IntroRun = {
+  startMs: number;
+  timing: IntroTiming;
+  /** Lift order by entity ID, for the pieces the intro opened with. */
+  order: Map<string, number>;
+  count: number;
+};
+
 function prefersReducedMotion() {
   return (
     typeof window !== "undefined" &&
@@ -283,9 +307,14 @@ export class StoryStageRenderer {
   private drawnTitle: StageTitleCard | null = null;
   private titleCard: StageTitleCard | null = null;
   private titleStartMs = 0;
-  private introStartMs: number | undefined;
-  /** Lift order for the intro (scenery first, travellers last). */
-  private introOrder = new Map<string, number>();
+  private intro: IntroRun | undefined;
+  private readonly liftNewPieces: boolean;
+  /** Every entity ID this stage has shown, to spot new drawings. */
+  private readonly knownIds = new Set<string>();
+  /** New drawings lifting off, by entity ID: when their lift started. */
+  private readonly lifts = new Map<string, number>();
+  /** Lift states last reported, so each change is emitted once. */
+  private reportedLifts = "";
   private readonly mattes = new Graphics();
   private readonly entityLayer = new Container();
   private readonly rainLayer = new Graphics();
@@ -325,6 +354,8 @@ export class StoryStageRenderer {
     this.sceneIds = new Set(options.scene.objects.map((object) => object.id));
     this.reducedMotion = options.reducedMotion ?? prefersReducedMotion();
     this.interactive = options.interactive ?? false;
+    this.liftNewPieces = options.liftNewPieces ?? false;
+    for (const entity of options.world.entities) this.knownIds.add(entity.id);
     this.keepCommittedRevealsVisible =
       options.keepCommittedRevealsVisible ?? false;
     this.canvasCaptions = options.canvasCaptions ?? false;
@@ -372,7 +403,7 @@ export class StoryStageRenderer {
   /** Shows a newly committed world. Offsets persist by entity ID. */
   setWorld(world: WorldState) {
     if (this.destroyed) return;
-    this.world = world;
+    this.adoptWorld(world);
     if (this.initialized) this.syncViews();
     this.emit();
   }
@@ -395,6 +426,19 @@ export class StoryStageRenderer {
   ): Promise<void> {
     if (this.destroyed) return;
     const request = ++this.playRequests;
+    // The lift-off reveal is never cut: a sequence waits for it to finish.
+    // The first sequence to arrive then plays first, like one already on
+    // stage, and a newer one takes over at the end of its beat.
+    while (this.intro && !this.destroyed) {
+      const intro = this.intro;
+      await this.wait(
+        intro.startMs +
+          introDurationMs(intro.count, intro.timing) -
+          this.clockMs,
+        signal,
+      );
+      if (signal.aborted || this.destroyed) return;
+    }
     const running = this.playback;
     // Wait for the beat on stage to end; a reveal may extend it by a frame
     // or two while it waits to draw, so check again after each wait.
@@ -423,7 +467,7 @@ export class StoryStageRenderer {
       this.resumeFrom = undefined;
       this.sequence = sequence;
       if (nextWorld && !this.destroyed) {
-        this.world = nextWorld;
+        this.adoptWorld(nextWorld);
         if (this.initialized) this.syncViews();
       }
       const world = this.world;
@@ -479,32 +523,34 @@ export class StoryStageRenderer {
 
   /**
    * The reveal where pieces lift off the paper: the drawing starts flat, then
-   * each piece peels up, rises with a small shake and settles into its idle
-   * loop (under reduced motion they only fade in). `caption` replaces the
-   * caption for the intro. Resolves when the intro ends or `signal` aborts.
-   * Story beats and tap reactions layer over it as usual.
+   * the pieces peel up together a small stagger apart (`liftOrder`), rise
+   * with a small shake and settle into their idle loops (under reduced motion
+   * they only fade in). `caption` replaces the caption for the intro.
+   * Resolves when the intro ends or `signal` aborts. A sequence handed over
+   * meanwhile waits for it, and a piece reacts to taps once it has landed.
    */
   async playIntro(
     signal: AbortSignal,
-    options: { caption?: string } = {},
+    options: { timing: IntroTiming; caption?: string },
   ): Promise<void> {
     if (this.destroyed || signal.aborted) return;
-    const ordered = [...this.world.entities].sort(
-      (a, b) => paintLayerFor(a) - paintLayerFor(b),
-    );
-    this.introOrder = new Map(
-      ordered.map((entity, index) => [entity.id, index]),
-    );
-    const startMs = this.clockMs;
-    this.introStartMs = startMs;
-    if (options.caption) {
-      this.caption = options.caption;
-      this.emit();
-    }
+    const order = liftOrder(this.world.entities);
+    const intro: IntroRun = {
+      startMs: this.clockMs,
+      timing: options.timing,
+      order: new Map(order.map((id, index) => [id, index])),
+      count: order.length,
+    };
+    this.intro = intro;
+    if (options.caption) this.caption = options.caption;
+    this.emit();
     try {
-      await this.wait(introDurationMs(ordered.length), signal);
+      await this.wait(introDurationMs(intro.count, intro.timing), signal);
     } finally {
-      if (this.introStartMs === startMs) this.introStartMs = undefined;
+      if (this.intro === intro) {
+        this.intro = undefined;
+        this.emit();
+      }
     }
   }
 
@@ -561,7 +607,12 @@ export class StoryStageRenderer {
     const view = this.views.get(entityId);
     const entity =
       view?.entity ?? this.world.entities.find((item) => item.id === entityId);
-    if (!entity || this.pendingReveal() === entityId) return undefined;
+    if (
+      !entity ||
+      this.pendingReveal() === entityId ||
+      this.liftState(entityId) !== undefined
+    )
+      return undefined;
     const { state, started } = tapReaction(
       this.reactionState(entityId),
       entity,
@@ -707,6 +758,7 @@ export class StoryStageRenderer {
   private advanceClock(deltaMs: number) {
     this.clockMs += deltaMs;
     this.settleReactions();
+    this.settleLifts();
     if (!this.waiters.length) return;
     const due = this.waiters.filter((waiter) => waiter.atMs <= this.clockMs);
     if (!due.length) return;
@@ -759,6 +811,63 @@ export class StoryStageRenderer {
     for (const [id, state] of this.detachedReactions)
       this.detachedReactions.set(id, settle(state));
     if (changed) this.emit();
+  }
+
+  // ---- lift-off ----------------------------------------------------------
+
+  /** Takes a new world, starting a lift-off for any piece that is new. */
+  private adoptWorld(world: WorldState) {
+    this.world = world;
+    for (const entity of world.entities) {
+      if (this.knownIds.has(entity.id)) continue;
+      this.knownIds.add(entity.id);
+      // Even mid-intro a new drawing lifts on its own, straight away.
+      if (this.liftNewPieces) this.lifts.set(entity.id, this.clockMs);
+    }
+  }
+
+  /**
+   * A piece's slot in the running intro, or undefined when it has none. A
+   * piece that joins mid-intro lifts on its own when new pieces lift (the
+   * live stage); otherwise it lifts last with the intro.
+   */
+  private introIndex(entityId: string) {
+    const intro = this.intro;
+    if (!intro) return undefined;
+    const index = intro.order.get(entityId);
+    if (index !== undefined || this.liftNewPieces) return index;
+    return intro.count - 1;
+  }
+
+  /** Where a piece is in its lift-off, or undefined once it has landed. */
+  private liftState(entityId: string): "flat" | "lifting" | undefined {
+    const now = this.clockMs;
+    const lift = this.lifts.get(entityId);
+    if (lift !== undefined)
+      return now < lift + DRAWING_LIFT.liftMs ? "lifting" : undefined;
+    const intro = this.intro;
+    const index = this.introIndex(entityId);
+    if (intro && index !== undefined) {
+      const start =
+        intro.startMs + introPieceStartMs(index, intro.count, intro.timing);
+      if (now < start) return "flat";
+      if (now < start + intro.timing.liftMs) return "lifting";
+    }
+    return undefined;
+  }
+
+  /** Ends finished lifts and tells the host when a piece's state changed. */
+  private settleLifts() {
+    if (!this.intro && !this.lifts.size && !this.reportedLifts) return;
+    for (const [id, startMs] of this.lifts)
+      if (this.clockMs >= startMs + DRAWING_LIFT.liftMs) this.lifts.delete(id);
+    const states = this.world.entities.map((entity) =>
+      this.liftState(entity.id),
+    );
+    const report = states.some(Boolean) ? states.join(",") : "";
+    if (report === this.reportedLifts) return;
+    this.reportedLifts = report;
+    this.emit();
   }
 
   // ---- state -------------------------------------------------------------
@@ -856,6 +965,7 @@ export class StoryStageRenderer {
       celebrating: !this.reducedMotion && this.action?.type === "celebrate",
       imageStatus: this.imageStatus,
       canvasFailed: this.canvasFailed,
+      intro: this.intro ? "playing" : "done",
       entities: this.world.entities.map((entity) => {
         const offset = this.offsets.get(entity.id);
         const home = center(entity.bounds);
@@ -864,7 +974,10 @@ export class StoryStageRenderer {
           id: entity.id,
           name: entity.name,
           role: entity.role,
-          revealState: pending === entity.id ? "hidden" : "visible",
+          revealState:
+            pending === entity.id
+              ? "hidden"
+              : (this.liftState(entity.id) ?? "visible"),
           placement: this.placements.get(entity.id) ?? "source",
           logicalX: logicalX(entity, offset),
           centerX: Math.round(home.x + (offset?.x ?? 0)),
@@ -1141,9 +1254,8 @@ export class StoryStageRenderer {
     const pending = this.pendingReveal();
     const action = this.action;
     const activeId = action && "entityId" in action ? action.entityId : "";
-    const introMs =
-      this.introStartMs === undefined ? undefined : now - this.introStartMs;
-    const introCount = this.introOrder.size;
+    const introRun = this.intro;
+    const introMs = introRun ? now - introRun.startMs : 0;
 
     for (const view of this.views.values()) {
       const { entity, container } = view;
@@ -1151,16 +1263,21 @@ export class StoryStageRenderer {
       const offset = this.reducedMotion
         ? view.moveTo
         : tweenOffset(view.moveFrom, view.moveTo, now - view.moveStartMs);
-      // A piece that joined mid-intro lifts last.
+      // A new drawing has its own lift, even mid-intro (see introIndex).
+      const liftStart = this.lifts.get(entity.id);
+      const introIndex = this.introIndex(entity.id);
       const intro =
-        introMs === undefined
-          ? undefined
-          : sampleIntro(
-              introMs,
-              this.introOrder.get(entity.id) ?? introCount - 1,
-              introCount,
-              this.reducedMotion,
-            );
+        liftStart !== undefined
+          ? sampleIntro(now - liftStart, 0, 1, this.reducedMotion, DRAWING_LIFT)
+          : introRun && introIndex !== undefined
+            ? sampleIntro(
+                introMs,
+                introIndex,
+                introRun.count,
+                this.reducedMotion,
+                introRun.timing,
+              )
+            : undefined;
       const idle = weightPose(
         this.reducedMotion
           ? RESTING_POSE
@@ -1215,10 +1332,9 @@ export class StoryStageRenderer {
         );
     }
 
-    const paper =
-      introMs === undefined
-        ? { backdropAlpha: RESTING_BACKDROP_ALPHA, matteAlpha: 1 }
-        : introBackdrop(introMs, introCount);
+    const paper = introRun
+      ? introBackdrop(introMs, introRun.count, introRun.timing)
+      : { backdropAlpha: RESTING_BACKDROP_ALPHA, matteAlpha: 1 };
     if (this.backdropSprite) this.backdropSprite.alpha = paper.backdropAlpha;
     this.mattes.alpha = paper.matteAlpha;
 

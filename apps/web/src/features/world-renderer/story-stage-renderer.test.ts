@@ -23,8 +23,23 @@ const pixi = vi.hoisted(() => {
     hitArea: unknown;
     interactiveChildren = true;
     handlers: Record<string, ((event: { button: number }) => void)[]> = {};
-    position = { set: () => undefined };
-    scale = { set: () => undefined };
+    // Record where each piece is drawn and how big.
+    position = {
+      x: 0,
+      y: 0,
+      set(x: number, y: number) {
+        this.x = x;
+        this.y = y;
+      },
+    };
+    scale = {
+      x: 1,
+      y: 1,
+      set(x: number, y = x) {
+        this.x = x;
+        this.y = y;
+      },
+    };
     anchor = { set: () => undefined };
     constructor(options?: { label?: string }) {
       this.label = options?.label;
@@ -142,8 +157,15 @@ const pixi = vi.hoisted(() => {
 
 vi.mock("pixi.js", () => pixi.module);
 
-const { StoryStageRenderer } = await import("./story-stage-renderer");
-const { introDurationMs } = await import("./intro-motion");
+const { INITIAL_CAPTION, StoryStageRenderer } =
+  await import("./story-stage-renderer");
+const {
+  DRAWING_LIFT,
+  introDurationMs,
+  introPieceStartMs,
+  KEEPSAKE_INTRO,
+  LIVE_INTRO,
+} = await import("./intro-motion");
 
 type FakeImage = {
   src: string;
@@ -567,13 +589,16 @@ describe("StoryStageRenderer recording features", () => {
     await stage.ready;
     let done = false;
     void stage
-      .playIntro(new AbortController().signal, { caption: "Fox explores." })
+      .playIntro(new AbortController().signal, {
+        timing: KEEPSAKE_INTRO,
+        caption: "Fox explores.",
+      })
       .then(() => (done = true));
     expect(stage.getSnapshot().caption).toBe("Fox explores.");
     await run(16);
     expect(piece(stage, "fox").alpha).toBe(0);
     expect(layers()[1]!.alpha).toBe(0); // the mattes
-    await run(introDurationMs(3) + 32);
+    await run(introDurationMs(3, KEEPSAKE_INTRO) + 32);
     expect(done).toBe(true);
     expect(piece(stage, "fox").alpha).toBe(1);
     expect(layers()[1]!.alpha).toBe(1);
@@ -792,5 +817,295 @@ describe("StoryStageRenderer mid-story drawings", () => {
     expect(stage.getSnapshot().caption).toBe("Newest moment.");
     expect(captions.has("Older moment.")).toBe(false);
     stage.destroy();
+  });
+});
+
+describe("StoryStageRenderer live lift-off", () => {
+  type Stage = InstanceType<typeof StoryStageRenderer>;
+  type Shown = {
+    alpha: number;
+    rotation: number;
+    position: { x: number; y: number };
+    scale: { x: number; y: number };
+  };
+  const piece = (stage: Stage, id: string) =>
+    stage.entityObject(id) as unknown as Shown;
+  /** Where a piece rests: the centre of its bounds. */
+  const home = (entity: Entity) => ({
+    x: entity.bounds.x + entity.bounds.width / 2,
+    y: entity.bounds.y + entity.bounds.height / 2,
+  });
+  const states = (stage: Stage) =>
+    Object.fromEntries(
+      stage.getSnapshot().entities.map((item) => [item.id, item.revealState]),
+    );
+  async function run(milliseconds: number) {
+    const app = pixi.state.apps.at(-1)!;
+    for (let elapsed = 0; elapsed < milliseconds; elapsed += 16) {
+      app.tick(16);
+      await flush();
+    }
+  }
+  const opening: StorySequence = {
+    ...sequence,
+    sourceEventId: "event-opening",
+    beats: [
+      {
+        id: "beat-1",
+        narration: "Fox wakes up.",
+        mood: "curious",
+        action: { type: "focus", entityId: "fox" },
+      },
+    ],
+  };
+
+  it("lifts every piece from flat to landed, then reports the reveal done", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world(),
+      interactive: true,
+    });
+    await stage.ready;
+    expect(stage.getSnapshot().intro).toBe("done");
+    let done = false;
+    void stage
+      .playIntro(new AbortController().signal, { timing: LIVE_INTRO })
+      .then(() => (done = true));
+    expect(stage.getSnapshot().intro).toBe("playing");
+    expect(states(stage)).toEqual({
+      fox: "flat",
+      river: "flat",
+      castle: "flat",
+    });
+    // Flat pieces and pieces in the air ignore taps.
+    expect(stage.react("fox")).toBeUndefined();
+    await run(LIVE_INTRO.leadMs + 300);
+    expect(states(stage)).toEqual({
+      fox: "lifting",
+      river: "lifting",
+      castle: "lifting",
+    });
+    expect(stage.react("castle")).toBeUndefined();
+    const lastLanding = introPieceStartMs(2, 3, LIVE_INTRO) + LIVE_INTRO.liftMs;
+    await run(lastLanding - (LIVE_INTRO.leadMs + 300) + 32);
+    expect(states(stage)).toEqual({
+      fox: "visible",
+      river: "visible",
+      castle: "visible",
+    });
+    expect(stage.react("fox")).toBeDefined();
+    expect(done).toBe(false);
+    await run(LIVE_INTRO.settleMs + 32);
+    expect(done).toBe(true);
+    expect(stage.getSnapshot().intro).toBe("done");
+    stage.destroy();
+  });
+
+  it("plays the first sequence after the reveal, whole", async () => {
+    const stage = new StoryStageRenderer({ scene, world: world() });
+    await stage.ready;
+    void stage.playIntro(new AbortController().signal, { timing: LIVE_INTRO });
+    void stage.playSequence(opening, new AbortController().signal);
+    const seen: string[] = [];
+    stage.subscribe(() => {
+      const { caption, intro } = stage.getSnapshot();
+      if (seen.at(-1) !== caption + "|" + intro)
+        seen.push(caption + "|" + intro);
+    });
+    await run(introDurationMs(3, LIVE_INTRO) - 100);
+    expect(stage.getSnapshot().caption).toBe(INITIAL_CAPTION);
+    expect(stage.getSnapshot().intro).toBe("playing");
+    await run(200);
+    expect(stage.getSnapshot().caption).toBe("Fox wakes up.");
+    // The opening narration never shared the stage with the reveal.
+    expect(seen.filter((item) => item.startsWith("Fox wakes up."))).toEqual([
+      "Fox wakes up.|done",
+    ]);
+    stage.destroy();
+  });
+
+  it("gives the first sequence its beat when a newer one arrives mid-reveal", async () => {
+    const stage = new StoryStageRenderer({ scene, world: world() });
+    await stage.ready;
+    void stage.playIntro(new AbortController().signal, { timing: LIVE_INTRO });
+    void stage.playSequence(opening, new AbortController().signal);
+    await run(500);
+    void stage.playSequence(
+      {
+        ...opening,
+        sourceEventId: "event-bridge",
+        beats: [
+          {
+            id: "beat-1",
+            narration: "A bridge appears.",
+            mood: "delighted",
+            action: { type: "focus", entityId: "castle" },
+          },
+        ],
+      },
+      new AbortController().signal,
+    );
+    await run(introDurationMs(3, LIVE_INTRO) - 500 + 64);
+    expect(stage.getSnapshot().caption).toBe("Fox wakes up.");
+    await run(1500);
+    expect(stage.getSnapshot().caption).toBe("A bridge appears.");
+    stage.destroy();
+  });
+
+  it("only fades pieces in under reduced motion", async () => {
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world(),
+      reducedMotion: true,
+    });
+    await stage.ready;
+    void stage.playIntro(new AbortController().signal, { timing: LIVE_INTRO });
+    const alphas: number[] = [];
+    for (let at = 0; at < introDurationMs(3, LIVE_INTRO); at += 64) {
+      await run(64);
+      alphas.push(piece(stage, "fox").alpha);
+      // No rise, no swell, no shake: every piece stays exactly at rest.
+      for (const entity of [fox, river, castle]) {
+        const shown = piece(stage, entity.id);
+        expect(shown.rotation).toBe(0);
+        expect(shown.position).toMatchObject(home(entity));
+        expect(shown.scale).toMatchObject({ x: 1, y: 1 });
+      }
+    }
+    expect(alphas[0]).toBe(0);
+    expect(alphas.some((alpha) => alpha > 0.2 && alpha < 0.8)).toBe(true);
+    expect(alphas.at(-1)).toBe(1);
+    stage.destroy();
+  });
+
+  it("shakes pieces as they lift with full motion", async () => {
+    const stage = new StoryStageRenderer({ scene, world: world() });
+    await stage.ready;
+    void stage.playIntro(new AbortController().signal, { timing: LIVE_INTRO });
+    await run(LIVE_INTRO.leadMs + LIVE_INTRO.liftMs * 0.3);
+    const turns: number[] = [];
+    const heights: number[] = [];
+    for (let frame = 0; frame < 20; frame++) {
+      await run(16);
+      turns.push(piece(stage, "river").rotation);
+      heights.push(piece(stage, "river").position.y);
+    }
+    expect(Math.max(...turns)).toBeGreaterThan(0.005);
+    expect(Math.min(...turns)).toBeLessThan(-0.005);
+    // It is up off the paper and a little bigger while it hangs there.
+    expect(Math.min(...heights)).toBeLessThan(home(river).y - 15);
+    expect(piece(stage, "river").scale.x).toBeGreaterThan(1);
+    stage.destroy();
+  });
+
+  it("gives a new drawing its own short lift-off without cutting the beat", async () => {
+    const bridge: Entity = {
+      id: "bridge",
+      role: "helper",
+      description: "",
+      properties: ["carries"],
+      name: "Bridge",
+      bounds: { x: 420, y: 300, width: 160, height: 60 },
+      sketch: { strokes: [[425, 330, 575, 330]] },
+    };
+    // Two stages play the same sequence; one gets the new drawing mid-beat.
+    const make = async () => {
+      const stage = new StoryStageRenderer({
+        scene,
+        world: world(),
+        interactive: true,
+        liftNewPieces: true,
+      });
+      await stage.ready;
+      void stage.playSequence(sequence, new AbortController().signal);
+      return { stage, app: pixi.state.apps.at(-1)! };
+    };
+    const plain = await make();
+    const drawn = await make();
+    const captions = { plain: [] as string[], drawn: [] as string[] };
+    const frame = async () => {
+      plain.app.tick(16);
+      drawn.app.tick(16);
+      await flush();
+      captions.plain.push(plain.stage.getSnapshot().caption);
+      captions.drawn.push(drawn.stage.getSnapshot().caption);
+    };
+    for (let index = 0; index < 6; index++) await frame();
+    drawn.stage.setWorld(world([fox, river, castle, bridge]));
+    expect(states(drawn.stage).bridge).toBe("lifting");
+    expect(drawn.stage.getSnapshot().intro).toBe("done");
+    await frame();
+    // Shown at once: its paper cutout hands straight over.
+    expect(piece(drawn.stage, "bridge").alpha).toBe(1);
+    expect(drawn.stage.react("bridge")).toBeUndefined();
+    for (let at = 0; at < DRAWING_LIFT.liftMs; at += 16) await frame();
+    expect(states(drawn.stage).bridge).toBe("visible");
+    expect(drawn.stage.react("bridge")).toBeDefined();
+    for (let index = 0; index < 60; index++) await frame();
+    // The story on stage kept exactly its pace through the lift.
+    expect(captions.drawn).toEqual(captions.plain);
+    expect(captions.drawn).toContain("River stops the way.");
+    plain.stage.destroy();
+    drawn.stage.destroy();
+  });
+
+  it("lifts a drawing committed mid-reveal on its own, straight away", async () => {
+    const bridge: Entity = {
+      id: "bridge",
+      role: "helper",
+      description: "",
+      properties: ["carries"],
+      name: "Bridge",
+      bounds: { x: 420, y: 300, width: 160, height: 60 },
+      sketch: { strokes: [[425, 330, 575, 330]] },
+    };
+    const stage = new StoryStageRenderer({
+      scene,
+      world: world(),
+      interactive: true,
+      liftNewPieces: true,
+    });
+    await stage.ready;
+    void stage.playIntro(new AbortController().signal, { timing: LIVE_INTRO });
+    await run(300);
+    // Still before any scene piece lifts.
+    stage.setWorld(world([fox, river, castle, bridge]));
+    expect(states(stage)).toMatchObject({ fox: "flat", bridge: "lifting" });
+    await run(16);
+    // Shown at once, as its cutout hands over, and up off the paper soon.
+    expect(piece(stage, "bridge").alpha).toBe(1);
+    const heights: number[] = [];
+    for (let at = 0; at < DRAWING_LIFT.liftMs; at += 16) {
+      await run(16);
+      heights.push(piece(stage, "bridge").position.y);
+      expect(piece(stage, "bridge").alpha).toBe(1);
+    }
+    expect(Math.min(...heights)).toBeLessThan(home(bridge).y - 15);
+    // Landed while the reveal is still playing, and stays shown.
+    expect(stage.getSnapshot().intro).toBe("playing");
+    expect(states(stage).bridge).toBe("visible");
+    expect(stage.react("bridge")).toBeDefined();
+    await run(introDurationMs(3, LIVE_INTRO));
+    expect(stage.getSnapshot().intro).toBe("done");
+    expect(piece(stage, "bridge").alpha).toBe(1);
+    expect(states(stage).bridge).toBe("visible");
+    stage.destroy();
+  });
+
+  it("lifts only pieces added later, and only when asked", async () => {
+    const plain = new StoryStageRenderer({ scene, world: world([fox]) });
+    await plain.ready;
+    plain.setWorld(world([fox, river]));
+    expect(states(plain)).toEqual({ fox: "visible", river: "visible" });
+    plain.destroy();
+    const lifting = new StoryStageRenderer({
+      scene,
+      world: world([fox]),
+      liftNewPieces: true,
+    });
+    await lifting.ready;
+    lifting.setWorld(world([fox, river]));
+    expect(states(lifting)).toEqual({ fox: "visible", river: "lifting" });
+    lifting.destroy();
   });
 });
