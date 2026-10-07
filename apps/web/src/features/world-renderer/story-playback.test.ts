@@ -417,7 +417,7 @@ describe("beat timing and resting state", () => {
   });
 
   it("leaves an arrival flourish room to finish, even in a recording's shortest beat", () => {
-    // 1400 ms is the keepsake's shortest beat.
+    // Down to 1400 ms, below the keepsake's 2 s floor.
     for (const hold of [1400, 2000, BEAT_HOLD_MS.splash])
       for (const type of ["splash", "blocked_by"] as const) {
         const travel = beatTravelMs(type, hold, false);

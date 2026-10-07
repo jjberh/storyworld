@@ -123,6 +123,11 @@ const openingSequence = sequence(opening, [
   { type: "move_toward", entityId: "fox", targetId: "castle" },
   { type: "blocked_by", entityId: "fox", obstacleId: "river" },
 ]);
+/** An opening short enough to play alongside a 3-beat moment. */
+const shortOpening = sequence(opening, [
+  { type: "focus", entityId: "fox" },
+  { type: "blocked_by", entityId: "fox", obstacleId: "river" },
+]);
 const cloudSequence = sequence(withCloud, [
   { type: "reveal", entityId: "cloud" },
   { type: "weather_shift", weather: "rain", causeEntityId: "cloud" },
@@ -218,7 +223,7 @@ describe("buildKeepsakeScript", () => {
   it("plays the reveal, the opening and the best moment, then an end card", () => {
     const script = buildKeepsakeScript({
       events: [opening, withCloud, withBridge],
-      sequences: sequences(openingSequence, cloudSequence, bridgeSequence),
+      sequences: sequences(shortOpening, cloudSequence, bridgeSequence),
       openingNarration: "Fox explores.",
     })!;
     expectContiguous(script);
@@ -239,7 +244,7 @@ describe("buildKeepsakeScript", () => {
       caption: "Fox explores.",
       durationMs: introDurationMs(3, KEEPSAKE_INTRO),
     });
-    expect(first).toMatchObject({ role: "opening", sequence: openingSequence });
+    expect(first).toMatchObject({ role: "opening", sequence: shortOpening });
     // The moment starts from the world before it, then shows its own world.
     expect(moment).toMatchObject({
       role: "moment",
@@ -257,9 +262,12 @@ describe("buildKeepsakeScript", () => {
   it("plays every beat whole at the budget's cap: play steps are never cut", () => {
     const script = buildKeepsakeScript({
       events: [opening, withBridge],
-      sequences: sequences(openingSequence, bridgeSequence),
+      sequences: sequences(shortOpening, bridgeSequence),
     })!;
-    // Two 3-beat sequences at the live 2–4 s holds need the budget's cap.
+    // Five beats at the live 2–4 s holds need the budget's cap.
+    expect(
+      script.steps.flatMap((step) => (step.kind === "play" ? [step.role] : [])),
+    ).toEqual(["opening", "moment"]);
     expect(script.maxBeatMs).toBeGreaterThanOrEqual(KEEPSAKE_BEAT_MS);
     expect(script.maxBeatMs).toBeLessThan(BEAT_HOLD_MS.celebrate);
     for (const step of script.steps)
@@ -447,10 +455,13 @@ describe("the 15 second ceiling", () => {
         );
   }
 
-  it("shortens the live holds to fit a crowded drawing, a 3-beat opening and a 3-beat moment", () => {
+  it("shortens the live holds to fit a crowded drawing, an opening and a 3-beat moment", () => {
     const script = buildKeepsakeScript({
       events: [first, second],
-      sequences: sequences(threeBeats(first), threeBeats(second)),
+      sequences: sequences(
+        sequence(first, [{ type: "focus", entityId: "fox" }]),
+        threeBeats(second),
+      ),
     })!;
     expectContiguous(script);
     expectWholeBeats(script);
@@ -466,6 +477,26 @@ describe("the 15 second ceiling", () => {
     expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
     expect(script.totalMs).toBeGreaterThanOrEqual(MIN_MOVIE_MS);
     expect(script.steps.at(-1)).toMatchObject({ durationMs: END_CARD_MS });
+  });
+
+  it("drops the opening rather than hold beats under 2 s", () => {
+    // Two 3-beat sequences after a crowded drawing's long intro would need
+    // beats shorter than 2 s; the moment plays alone at its live holds.
+    const script = buildKeepsakeScript({
+      events: [first, second],
+      sequences: sequences(threeBeats(first), threeBeats(second)),
+    })!;
+    expectContiguous(script);
+    expectWholeBeats(script);
+    expect(KEEPSAKE_BEAT_MS).toBe(2000);
+    expect(script.steps.map((step) => step.kind)).toEqual([
+      "intro",
+      "play",
+      "hold",
+    ]);
+    expect(script.steps[1]).toMatchObject({ role: "moment" });
+    expect(script.maxBeatMs).toBeUndefined();
+    expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
   });
 
   it("keeps the live holds when a small drawing leaves room", () => {
@@ -517,7 +548,7 @@ describe("the 15 second ceiling", () => {
     expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
   });
 
-  it("fits three of any beat in both sequences, at any drawing size", () => {
+  it("fits three of any beat in the moment at any drawing size, dropping a 3-beat opening", () => {
     const types = storyActionSchema.options.map(
       (option) => option.shape.type.value,
     );
@@ -563,17 +594,21 @@ describe("the 15 second ceiling", () => {
             reducedMotion,
           })!;
           expectContiguous(script);
-          // Both sequences play whole (a focus-only one scores nothing, so
-          // it is never the moment), and the end card closes the movie.
+          // The moment always plays (a focus-only one scores nothing, so it
+          // is never the moment). Six beats at 2 s (12 s) never fit beside
+          // even the shortest intro and the end card (at most 10.75 s), so
+          // the opening is dropped rather than hold beats under 2 s.
           expect(
-            script.steps.filter((step) => step.kind === "play"),
-          ).toHaveLength(type === "focus" ? 1 : 2);
+            script.steps.flatMap((step) =>
+              step.kind === "play" ? [step.role] : [],
+            ),
+          ).toEqual(type === "focus" ? ["opening"] : ["moment"]);
           expect(script.steps.at(-1)).toMatchObject({
             durationMs: END_CARD_MS,
             titleCard: { title: "Fox's story" },
           });
           for (const step of script.steps)
-            if (step.kind === "play")
+            if (step.kind === "play") {
               expect(step.durationMs).toBe(
                 sequenceDurationMs(
                   step.sequence,
@@ -581,6 +616,10 @@ describe("the 15 second ceiling", () => {
                   script.maxBeatMs,
                 ),
               );
+              expect(step.durationMs).toBeGreaterThanOrEqual(
+                step.sequence.beats.length * KEEPSAKE_BEAT_MS,
+              );
+            }
           expect(script.totalMs).toBeGreaterThanOrEqual(MIN_MOVIE_MS);
           expect(script.totalMs).toBeLessThanOrEqual(PLANNED_MAX_MS);
         }
@@ -606,12 +645,13 @@ describe("the 15 second ceiling", () => {
       sequences: sequences(reveals(first), reveals(second)),
     })!;
     expectContiguous(script);
+    // Too long for both at 2 s beats: the moment plays alone.
     expect(script.steps.map((step) => step.kind)).toEqual([
       "intro",
       "play",
-      "play",
       "hold",
     ]);
+    expect(script.steps[1]).toMatchObject({ role: "moment" });
     expect(script.totalMs).toBeLessThanOrEqual(MAX_MOVIE_MS);
   });
 });
